@@ -1,3 +1,2 @@
 allowBuilds:
-  msw: set this to true or false
-onlyBuiltDependencies: '[]'
+  msw: true
