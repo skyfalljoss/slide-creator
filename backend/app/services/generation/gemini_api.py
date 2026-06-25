@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 from typing import Any
 from urllib import error, parse, request
@@ -13,6 +14,9 @@ SLIDE_COUNTS = {"sales_9": 9, "internal_6": 6}
 SLIDE_COUNT_TOLERANCE = 3
 MAX_BULLETS = 5
 MAX_SCRIPT_SLIDES = 20
+GENERATION_PARSE_ATTEMPTS = 2
+
+logger = logging.getLogger(__name__)
 
 _CHART_RULES = """Critical chart rules:
 - Uploaded CSV/XLSX is the only allowed chart data source.
@@ -103,11 +107,9 @@ class GeminiApiService:
         del chart_data
         if req.source_type == "script":
             prompt = self.build_script_prompt(req, upload_summary=upload_summary)
-            raw_text = await self._generate_json(prompt)
-            return self.parse_slides_response(raw_text, deck_type=req.deck_type, enforce_count=False)
+            return await self._generate_with_retries(req, prompt, upload_summary=upload_summary, enforce_count=False)
         prompt = self.build_generation_prompt(req, upload_summary=upload_summary)
-        raw_text = await self._generate_json(prompt)
-        return self.parse_slides_response(raw_text, deck_type=req.deck_type)
+        return await self._generate_with_retries(req, prompt, upload_summary=upload_summary, enforce_count=True)
 
     async def refine(self, req: RefineRequest, current_slide: SlideData) -> SlideData:
         prompt = self.build_refine_prompt(req, current_slide)
@@ -274,6 +276,55 @@ Preserve or intentionally update framework fields so the slide remains renderabl
 
     async def _generate_json(self, prompt: str) -> str:
         return await asyncio.to_thread(self._post_generate_content, prompt)
+
+    async def _generate_with_retries(
+        self,
+        req: GenerateRequest,
+        prompt: str,
+        *,
+        upload_summary: dict | None,
+        enforce_count: bool,
+    ) -> list[SlideData]:
+        raw_text = ""
+        last_error: GeminiResponseError | None = None
+        current_prompt = prompt
+        for attempt in range(1, GENERATION_PARSE_ATTEMPTS + 1):
+            try:
+                raw_text = await self._generate_json(current_prompt)
+                return self.parse_slides_response(raw_text, deck_type=req.deck_type, enforce_count=enforce_count)
+            except GeminiResponseError as exc:
+                last_error = exc
+                logger.warning("Gemini generation attempt %s failed: %s", attempt, exc)
+                current_prompt = self.build_json_retry_prompt(prompt, raw_text, str(exc))
+
+        logger.exception("Gemini generation failed after retries; falling back to local generator", exc_info=last_error)
+        return await self._fallback_generate(req, upload_summary=upload_summary)
+
+    async def _fallback_generate(self, req: GenerateRequest, upload_summary: dict | None = None) -> list[SlideData]:
+        from app.services.generation.gemini import GeminiService
+
+        return await GeminiService().generate(req, upload_summary=upload_summary)
+
+    def build_json_retry_prompt(self, original_prompt: str, bad_response: str, error: str) -> str:
+        excerpt = bad_response[:4000] if bad_response else "<empty response>"
+        return f"""
+The previous response could not be parsed as the required slide JSON.
+Parser error: {error}
+
+Return a corrected response now.
+Rules:
+- Return JSON only.
+- Do not use markdown fences.
+- Use double quotes for every JSON property name and string.
+- Do not include comments, trailing commas, or prose.
+- Preserve the requested deck intent and schema.
+
+Bad response excerpt:
+{excerpt}
+
+Original request:
+{original_prompt}
+""".strip()
 
     def _post_generate_content(self, prompt: str) -> str:
         encoded_model = parse.quote(self.model, safe="")

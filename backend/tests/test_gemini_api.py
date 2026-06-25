@@ -60,6 +60,57 @@ def test_gemini_parser_accepts_structured_slide_json(monkeypatch: pytest.MonkeyP
     assert slides[0].visual_direction == "Use Citi-style hierarchy and clean whitespace."
 
 
+@pytest.mark.asyncio
+async def test_generate_retries_when_gemini_returns_invalid_json(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+    service = GeminiApiService()
+    valid_response = service.to_json(
+        {
+            "slides": [
+                {
+                    "index": i,
+                    "title": f"Slide {i}",
+                    "bullets": ["Insight-driven bullet"],
+                    "notes": "Speaker note.",
+                    "layout": "content" if i > 1 else "title",
+                }
+                for i in range(1, 10)
+            ]
+        }
+    )
+    responses = iter(['{"slides": [{bad: true}]}', valid_response])
+    prompts: list[str] = []
+
+    async def fake_generate_json(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(responses)
+
+    monkeypatch.setattr(service, "_generate_json", fake_generate_json)
+
+    slides = await service.generate(GenerateRequest(prompt="Create a deck", deck_type="sales_9"))
+
+    assert len(slides) == 9
+    assert len(prompts) == 2
+    assert "previous response could not be parsed" in prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_generate_falls_back_to_local_generator_after_retry_failures(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+    service = GeminiApiService()
+
+    async def fake_generate_json(prompt: str) -> str:
+        del prompt
+        return '{"slides": [{bad: true}]}'
+
+    monkeypatch.setattr(service, "_generate_json", fake_generate_json)
+
+    slides = await service.generate(GenerateRequest(prompt="Create a deck", deck_type="sales_9"))
+
+    assert len(slides) == 9
+    assert slides[0].title == "Client Name Proposal"
+
+
 def test_bullet_cap_truncates_to_five(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "gemini_api_key", "test-key")
     service = GeminiApiService()
