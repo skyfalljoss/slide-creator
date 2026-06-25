@@ -7,7 +7,7 @@ from pptx.util import Inches, Pt
 
 from app.services.presentation.pptx_canvas import PptxCanvas
 from app.services.presentation.pptx_layout import CANVAS_DIMS, LAYOUT
-from app.services.presentation.pptx_theme import THEMES
+from app.services.presentation.pptx_theme import DISPLAY_FONT, THEMES
 
 _PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 
@@ -56,7 +56,7 @@ def test_canvas_add_text_sets_font_and_margins():
     assert text_frame.margin_top == 0
     assert text_frame.margin_bottom == 0
     assert paragraph.text == "Revenue Outlook"
-    assert paragraph.font.name == "Arial"
+    assert paragraph.font.name == DISPLAY_FONT
     assert paragraph.font.size == Pt(20)
     assert paragraph.font.bold is True
     assert paragraph.font.color.rgb == theme.text
@@ -71,6 +71,7 @@ def test_canvas_bullets_box_uses_shape_to_fit_text():
     assert shape.text_frame.auto_size == MSO_AUTO_SIZE.SHAPE_TO_FIT_TEXT
     assert shape.text_frame.word_wrap is True
     assert "Key:" in shape.text
+    assert "\u2022" in shape.text
     assert "**" not in shape.text
 
 

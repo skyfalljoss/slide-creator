@@ -12,7 +12,7 @@ from pptx.util import Inches, Pt
 from app.services.media.icons import render_icon_png
 from app.services.presentation.pptx_layout import LAYOUT
 from app.services.presentation.pptx_text import add_markdown_paragraph, clean_inline_text, icon_shape
-from app.services.presentation.pptx_theme import WHITE, Theme
+from app.services.presentation.pptx_theme import BODY_FONT, DISPLAY_FONT, WHITE, Theme
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class PptxCanvas:
         self.clear_text_frame(text_frame)
         paragraph = text_frame.paragraphs[0]
         paragraph.text = clean_inline_text(text)
-        paragraph.font.name = "Arial"
+        paragraph.font.name = DISPLAY_FONT if bold or size >= 28 else BODY_FONT
         paragraph.font.size = Pt(size)
         paragraph.font.bold = bold
         paragraph.font.color.rgb = self._map_color(color)
@@ -88,7 +88,7 @@ class PptxCanvas:
         self.clear_text_frame(text_frame)
         mapped = self._map_color(color)
         for line in text.split("\n"):
-            add_markdown_paragraph(text_frame, line, size, "Arial", mapped)
+            add_markdown_paragraph(text_frame, line, size, BODY_FONT, mapped)
         return box
 
     def add_bullets_box(self, slide, bullets: list[str], left: float, top: float, width: float, height: float):
@@ -97,7 +97,7 @@ class PptxCanvas:
         self.clear_text_frame(text_frame)
         text_frame.auto_size = MSO_AUTO_SIZE.SHAPE_TO_FIT_TEXT
         for bullet in bullets:
-            add_markdown_paragraph(text_frame, bullet, 18, "Arial", self._map_color(self.theme.text))
+            add_markdown_paragraph(text_frame, f"\u2022 {bullet}", 18, BODY_FONT, self._map_color(self.theme.text))
         return text_box
 
     def add_card(self, slide, x: float, y: float, w: float, h: float, border_color: RGBColor | None = None):
@@ -168,7 +168,7 @@ class PptxCanvas:
         paragraph = text_frame.paragraphs[0]
         paragraph.text = str(number)
         paragraph.alignment = PP_ALIGN.CENTER
-        paragraph.font.name = "Arial"
+        paragraph.font.name = DISPLAY_FONT
         paragraph.font.size = Pt(22)
         paragraph.font.bold = True
         paragraph.font.color.rgb = WHITE

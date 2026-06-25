@@ -20,7 +20,12 @@ class PptxLayoutMixin:
     """Slide-specific layout renderers for the PPTX engine."""
 
     def _apply_title_slide(self, slide: Slide, data: SlideData) -> None:
-        self._add_slide_image(slide, getattr(data, "image_b64", None), 10.9, 0.95, 6.88, 8.1)
+        image_left = 10.95
+        image_top = 0.92
+        image_width = 6.8
+        image_height = 8.14
+        if not self._add_slide_image(slide, getattr(data, "image_b64", None), image_left, image_top, image_width, image_height):
+            self._add_cover_visual_panel(slide, image_left, image_top, image_width, image_height)
         kicker = getattr(data, "kicker", None)
         if kicker:
             self._add_eyebrow(slide, LAYOUT.left_margin, 3.05, kicker)
@@ -40,7 +45,7 @@ class PptxLayoutMixin:
             self._add_text(slide, LAYOUT.left_margin, subtitle_top, 9.0, 0.8, subtitle, 22, self.theme.muted)
         if secondary:
             secondary_top = subtitle_top + (0.92 if subtitle else 0)
-            self._add_text(slide, LAYOUT.left_margin, secondary_top, 9.0, 0.5, "  |  ".join(secondary), 15, self.theme.muted)
+            self._add_bullets_box(slide, secondary[:3], LAYOUT.left_margin, secondary_top, 9.2, 1.15)
 
     @staticmethod
     def _title_slide_title_height(title: str, width: float) -> float:
@@ -210,6 +215,25 @@ class PptxLayoutMixin:
         rect.shadow.inherit = False
         self._add_text(slide, left + 0.55, top + height / 2 - 0.25, width - 1.1, 0.5, "Image Placeholder", 18, self.theme.muted, align=PP_ALIGN.CENTER)
 
+    def _add_cover_visual_panel(self, slide: Slide, left: float, top: float, width: float, height: float) -> None:
+        panel = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, self._ix(left), self._iy(top), self._ix(width), self._iy(height))
+        panel.fill.solid()
+        panel.fill.fore_color.rgb = self._active_theme().panel_bg
+        panel.line.color.rgb = self._active_theme().panel_border
+        panel.shadow.inherit = False
+        for offset, alpha_width in ((0.55, 0.08), (1.05, 0.04), (1.55, 0.04)):
+            stripe = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                self._ix(left + offset),
+                self._iy(top + 0.65),
+                self._ix(alpha_width),
+                self._iy(height - 1.3),
+            )
+            stripe.fill.solid()
+            stripe.fill.fore_color.rgb = self._active_theme().accent
+            stripe.line.fill.background()
+            stripe.shadow.inherit = False
+
     def _apply_section_divider(self, slide: Slide, data: SlideData) -> None:
         number = str(max(data.index - 4, 1)) + "."
         self._guard_divider_text(data.title)
@@ -303,7 +327,7 @@ class PptxLayoutMixin:
     def _apply_standard_content(self, slide: Slide, data: SlideData) -> None:
         top = self._add_content_header(slide, data.title, getattr(data, "kicker", None))
         if data.bullets:
-            self._add_card_grid(slide, data.bullets, top)
+            self._add_modern_bullet_panel(slide, data.bullets, top)
         else:
             self._add_visual_panel(slide, data, LAYOUT.left_margin, top, LAYOUT.content_width, LAYOUT.content_bottom - top)
 
@@ -358,3 +382,11 @@ class PptxLayoutMixin:
             self._add_card(slide, x, y, cw, ch)
             self._add_icon_chip(slide, x + pad, y + pad, icon=item)
             self._add_card_text(slide, x + pad, y + pad + 0.85, cw - pad * 2, ch - pad - 0.95, item, 18, self.theme.text)
+
+    def _add_modern_bullet_panel(self, slide: Slide, items: list[str], top: float) -> None:
+        panel_h = min(LAYOUT.content_bottom - top, 5.9)
+        self._add_card(slide, LAYOUT.left_margin, top, 10.8, panel_h)
+        self._add_accent_bar(slide, LAYOUT.left_margin + 0.48, top + 0.52, 1.0, height=0.05)
+        self._add_bullets_box(slide, items[:5], LAYOUT.left_margin + 0.55, top + 0.95, 9.4, panel_h - 1.25)
+        if len(items) > 5:
+            self._add_text(slide, LAYOUT.left_margin + 0.55, top + panel_h - 0.45, 8.5, 0.35, f"+ {len(items) - 5} additional points", 13, self.theme.muted)

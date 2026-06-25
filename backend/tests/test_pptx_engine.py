@@ -386,6 +386,7 @@ def test_content_bullets_render_bold_runs_without_literal_markdown():
 
     assert bold_found
     assert "**" not in "".join(all_run_text)
+    assert "\u2022" in "".join(all_run_text)
 
 
 # --- Bug 3: auto-fit content boxes ---------------------------------------------
@@ -506,7 +507,10 @@ def test_title_slide_adds_image_when_present():
         SlideData(index=1, title="Cover", bullets=["Prepared for Client"], notes="", layout="title", image_b64=_PNG_1PX),
     ]
     prs = Presentation(BytesIO(PptxEngine().render(slides)))
-    assert any(sh.shape_type == MSO_SHAPE_TYPE.PICTURE for sh in prs.slides[0].shapes)
+    pictures = [sh for sh in prs.slides[0].shapes if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert pictures
+    assert pictures[0].left == Inches(10.95)
+    assert pictures[0].top == Inches(0.92)
 
 
 def test_section_divider_adds_image_when_present():
@@ -544,21 +548,21 @@ def test_dark_theme_sets_slide_background():
     assert bg == THEMES["dark"].background
 
 
-def test_minimalist_theme_uses_white_background():
-    assert THEMES["minimalist"].background == WHITE
+def test_minimalist_theme_uses_modern_off_white_background():
+    assert THEMES["minimalist"].background != WHITE
     assert THEMES["minimalist"].use_template is False
     slides = [SlideData(index=1, title="Cover", bullets=[], notes="", layout="title")]
     prs = Presentation(BytesIO(PptxEngine(theme="minimalist").render(slides)))
-    assert prs.slides[0].background.fill.fore_color.rgb == WHITE
+    assert prs.slides[0].background.fill.fore_color.rgb == THEMES["dark"].background
 
 
-def test_bold_theme_renders_without_template_and_has_white_background():
+def test_bold_theme_renders_without_template_and_uses_dark_cover_background():
     slides = [
         SlideData(index=1, title="Cover", bullets=[], notes="", layout="title"),
         SlideData(index=2, title="Detail", bullets=["A", "B"], notes="", layout="content"),
     ]
     prs = Presentation(BytesIO(PptxEngine(theme="bold").render(slides)))
-    assert prs.slides[0].background.fill.fore_color.rgb == THEMES["bold"].background
+    assert prs.slides[0].background.fill.fore_color.rgb == THEMES["dark"].background
 
 
 def test_resolve_theme_falls_back_to_minimalist():
@@ -1123,9 +1127,9 @@ def test_framework_variants_alternate_dark_and_light_backgrounds():
 
     prs = Presentation(BytesIO(PptxEngine().render(slides)))
 
-    assert prs.slides[0].background.fill.fore_color.rgb == WHITE
+    assert prs.slides[0].background.fill.fore_color.rgb == THEMES["dark"].background
     assert prs.slides[1].background.fill.fore_color.rgb == THEMES["dark"].background
-    assert prs.slides[2].background.fill.fore_color.rgb == WHITE
+    assert prs.slides[2].background.fill.fore_color.rgb == THEMES["minimalist"].background
     assert prs.slides[3].background.fill.fore_color.rgb == THEMES["dark"].background
 
 

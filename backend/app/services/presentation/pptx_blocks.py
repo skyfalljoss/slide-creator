@@ -6,7 +6,7 @@ from pptx.util import Pt
 from app.models.schemas import SlideData
 from app.services.presentation.pptx_layout import LAYOUT
 from app.services.presentation.pptx_text import clean_inline_text, split_label_body, table_row_from_text
-from app.services.presentation.pptx_theme import WHITE
+from app.services.presentation.pptx_theme import BODY_FONT, DISPLAY_FONT, WHITE
 
 
 class PptxBlockMixin:
@@ -187,7 +187,7 @@ class PptxBlockMixin:
                 cell = gtable.cell(0, c)
                 cell.text = htext
                 p = cell.text_frame.paragraphs[0]
-                p.font.name = "Arial"
+                p.font.name = DISPLAY_FONT
                 p.font.size = Pt(18)
                 p.font.bold = True
                 p.font.color.rgb = WHITE
@@ -199,6 +199,6 @@ class PptxBlockMixin:
                 cell = gtable.cell(r0 + ri, c)
                 cell.text = row[c] if c < len(row) else ""
                 p = cell.text_frame.paragraphs[0]
-                p.font.name = "Arial"
+                p.font.name = BODY_FONT
                 p.font.size = Pt(16)
                 p.font.color.rgb = self._map_color(self.theme.text if c == 0 else self.theme.muted)

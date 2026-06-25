@@ -10,6 +10,8 @@ MID_GRAY = RGBColor(0x80, 0x80, 0x80)
 LIGHT_GRAY = RGBColor(0xF3, 0xF5, 0xF8)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 PANEL_BORDER = RGBColor(0xD8, 0xDE, 0xE8)
+DISPLAY_FONT = "Aptos Display"
+BODY_FONT = "Aptos"
 
 TEMPLATE_RED = RGBColor(0xEE, 0x2A, 0x24)
 TEMPLATE_NAVY = RGBColor(0x00, 0x3B, 0x70)
@@ -39,9 +41,9 @@ class Theme:
 THEMES: dict[str, Theme] = {
     "minimalist": Theme(
         accent=TEMPLATE_RED, strong=TEMPLATE_NAVY, danger=TEMPLATE_RED, text=TEMPLATE_NAVY,
-        muted=TEMPLATE_MUTED, panel_bg=SURFACE, panel_border=CARD_BORDER,
-        surface=SURFACE, border=CARD_BORDER, accent_soft=RED_SOFT,
-        background=WHITE, accent_weight=1.0, use_template=False,
+        muted=TEMPLATE_MUTED, panel_bg=RGBColor(0xF0, 0xF3, 0xF7), panel_border=CARD_BORDER,
+        surface=RGBColor(0xFB, 0xFC, 0xFE), border=CARD_BORDER, accent_soft=RED_SOFT,
+        background=RGBColor(0xF8, 0xFA, 0xFC), accent_weight=1.0, use_template=False,
     ),
     "bold": Theme(
         accent=TEMPLATE_RED, strong=TEMPLATE_NAVY, danger=TEMPLATE_RED, text=TEMPLATE_NAVY,

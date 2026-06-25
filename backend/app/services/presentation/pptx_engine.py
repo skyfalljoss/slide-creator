@@ -17,7 +17,7 @@ from app.services.presentation.pptx_canvas import PptxCanvas
 from app.services.presentation.pptx_charts import PptxChartMixin
 from app.services.presentation.pptx_layout import CANVAS_DIMS, LAYOUT
 from app.services.presentation.pptx_layouts import PptxLayoutMixin
-from app.services.presentation.pptx_theme import THEMES, Theme, resolve_theme
+from app.services.presentation.pptx_theme import DISPLAY_FONT, THEMES, Theme, resolve_theme
 
 
 class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
@@ -92,7 +92,7 @@ class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
     def _uses_dark_variant(self, data: SlideData) -> bool:
         layout = data.layout.lower()
         if layout == "title":
-            return False
+            return True
         return (self._variant_for(data) or "") in self._DARK_VARIANTS
 
     def _active_theme(self) -> Theme:
@@ -314,7 +314,7 @@ class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
         text_box = slide.shapes.add_textbox(left, top, width, height)
         paragraph = text_box.text_frame.paragraphs[0]
         paragraph.text = "citi"
-        paragraph.font.name = "Arial"
+        paragraph.font.name = DISPLAY_FONT
         paragraph.font.size = Pt(16)
         paragraph.font.bold = True
         paragraph.font.color.rgb = self._active_theme().accent
