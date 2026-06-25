@@ -1,4 +1,5 @@
 import re
+import textwrap
 
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
@@ -22,15 +23,30 @@ class PptxLayoutMixin:
         self._add_slide_image(slide, getattr(data, "image_b64", None), 10.9, 0.95, 6.88, 8.1)
         kicker = getattr(data, "kicker", None)
         if kicker:
-            self._add_eyebrow(slide, LAYOUT.left_margin, 3.45, kicker)
-        self._add_text(slide, LAYOUT.left_margin, 3.9, 9.7, 1.8, data.title, 48, self.theme.text, bold=True)
-        self._add_accent_bar(slide, LAYOUT.left_margin, 5.85, LAYOUT.accent_rule_width, height=0.06)
+            self._add_eyebrow(slide, LAYOUT.left_margin, 3.05, kicker)
+
+        title_top = 3.45
+        title_width = 9.7
+        title_height = self._title_slide_title_height(data.title, title_width)
+        self._add_text(slide, LAYOUT.left_margin, title_top, title_width, title_height, data.title, 48, self.theme.text, bold=True)
+
+        accent_top = title_top + title_height + 0.22
+        self._add_accent_bar(slide, LAYOUT.left_margin, accent_top, LAYOUT.accent_rule_width, height=0.06)
+
         subtitle = data.subtitle or (data.bullets[0] if data.bullets else "")
         secondary = data.bullets if data.subtitle else data.bullets[1:]
+        subtitle_top = accent_top + 0.25
         if subtitle:
-            self._add_text(slide, LAYOUT.left_margin, 6.1, 9.0, 0.8, subtitle, 22, self.theme.muted)
+            self._add_text(slide, LAYOUT.left_margin, subtitle_top, 9.0, 0.8, subtitle, 22, self.theme.muted)
         if secondary:
-            self._add_text(slide, LAYOUT.left_margin, 7.0, 9.0, 0.5, "  |  ".join(secondary), 15, self.theme.muted)
+            secondary_top = subtitle_top + (0.92 if subtitle else 0)
+            self._add_text(slide, LAYOUT.left_margin, secondary_top, 9.0, 0.5, "  |  ".join(secondary), 15, self.theme.muted)
+
+    @staticmethod
+    def _title_slide_title_height(title: str, width: float) -> float:
+        chars_per_line = max(18, int(width / 0.44))
+        lines = textwrap.wrap(title or "", width=chars_per_line) or [""]
+        return min(max(1.25, len(lines) * 0.72), 3.25)
 
     def _apply_big_statement(self, slide: Slide, data: SlideData) -> None:
         label = getattr(data, "kicker", None) or "CORE INSIGHT"

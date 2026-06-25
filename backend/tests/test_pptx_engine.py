@@ -623,6 +623,29 @@ def test_title_slide_renders_explicit_subtitle():
     assert any("Prepared for ACME" in t for t in texts)
 
 
+def test_title_slide_long_title_does_not_overlap_subtitle():
+    long_title = "USF Campus Navigator: A Full-Stack Approach to Student Success"
+    subtitle = "Connecting Campus Life through Real-Time Navigation and Scheduling"
+    slides = [
+        SlideData(
+            index=1,
+            title=long_title,
+            kicker="PROJECT OVERVIEW",
+            subtitle=subtitle,
+            bullets=["Task: Design and implement a high-fidelity campus navigation prototype."],
+            notes="",
+            layout="title",
+        )
+    ]
+
+    prs = Presentation(BytesIO(PptxEngine().render(slides)))
+    shapes = {sh.text_frame.text: sh for sh in prs.slides[0].shapes if sh.has_text_frame}
+
+    title = shapes[long_title]
+    subtitle_shape = shapes[subtitle]
+    assert subtitle_shape.top > title.top + title.height
+
+
 def test_title_slide_falls_back_to_first_bullet_as_subtitle():
     slides = [SlideData(index=1, title="Renewable Energy", bullets=["Prepared for ACME", "June 2026"], notes="", layout="title")]
     prs = Presentation(BytesIO(PptxEngine().render(slides)))
