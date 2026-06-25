@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SlideForge PRD – Citigroup AI Presentation Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --citi-blue: #056DAE;
+            --citi-red: #E31837;
+            --citi-gray: #F5F7FA;
+        }
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        h1, h2, h3 { letter-spacing: -0.02em; }
+        .citi-blue { color: var(--citi-blue); }
+        .bg-citi-blue { background-color: var(--citi-blue); }
+        .border-citi-blue { border-color: var(--citi-blue); }
+        .citi-red { color: var(--citi-red); }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; }
+            main { margin: 0 !important; padding: 0 !important; }
+            article { box-shadow: none !important; margin: 0 !important; border-radius: 0 !important; }
+            section { page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body class="bg-[#F5F7FA] text-slate-800">
+    <div class="flex max-w-[1600px] mx-auto">
+        <!-- SIDEBAR TOC -->
+        <aside class="no-print hidden xl:block w-[280px] shrink-0 sticky top-0 h-screen overflow-y-auto bg-white border-r border-slate-200">
+            <div class="p-6">
+                <div class="flex items-center gap-2.5 mb-8">
+                    <div class="w-8 h-8 rounded-full bg-citi-blue flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">citi</span>
+                    </div>
+                    <div>
+                        <div class="font-semibold leading-none">SlideForge</div>
+                        <div class="text-[11px] text-slate-500 uppercase tracking-wide">PRD v1.0</div>
+                    </div>
+                </div>
+                <nav id="toc" class="space-y-1 text-[13px]">
+                    <a href="#document-control" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">1. Document Control</a>
+                    <a href="#executive-summary" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">2. Executive Summary</a>
+                    <a href="#goals" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">3. Goals and Non-Goals</a>
+                    <a href="#personas" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">4. Personas</a>
+                    <a href="#user-stories" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">5. User Stories</a>
+                    <a href="#scope" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">6. Product Scope</a>
+                    <a href="#functional" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">7. Functional Requirements</a>
+                    <a href="#decks" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">8. Deck Structures</a>
+                    <a href="#architecture" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">9. System Architecture</a>
+                    <a href="#privacy" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">10. Data Flow & Privacy</a>
+                    <a href="#uiux" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">11. UI/UX Flow</a>
+                    <a href="#api" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">12. API Specifications</a>
+                    <a href="#security" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">13. Security</a>
+                    <a href="#performance" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">14. Performance</a>
+                    <a href="#testing" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">15. Testing Plan</a>
+                    <a href="#metrics" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">16. Success Metrics</a>
+                    <a href="#timeline" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">17. Timeline</a>
+                    <a href="#risks" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">18. Risks</a>
+                    <a href="#questions" class="toc-link block px-3 py-1.5 rounded-md hover:bg-slate-100">19. Open Questions</a>
+                </nav>
+            </div>
+        </aside>
+
+        <!-- MAIN -->
+        <main class="flex-1 min-w-0">
+            <!-- HEADER -->
+            <header class="no-print sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-slate-200">
+                <div class="px-6 lg:px-10 h-[64px] flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <div class="xl:hidden w-7 h-7 rounded-full bg-citi-blue flex items-center justify-center">
+                            <span class="text-white font-bold text-xs">c</span>
+                        </div>
+                        <div>
+                            <h1 class="text-[17px] font-semibold leading-tight">SlideForge – AI Presentation Generator</h1>
+                            <p class="text-xs text-slate-500">Product Requirements Document • Gemini API via Vertex AI</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="hidden md:inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Approved for Build
+                        </span>
+                        <button onclick="window.print()" class="px-3 py-1.5 text-[13px] font-medium border border-slate-300 rounded-lg hover:bg-slate-50">Print</button>
+                        <button id="copy-link" class="px-3 py-1.5 text-[13px] font-medium bg-citi-blue text-white rounded-lg hover:bg-[#045a92]">Share</button>
+                    </div>
+                </div>
+            </header>
+
+            <article class="bg-white m-3 lg:m-8 rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
+                <!-- Cover -->
+                <div class="bg-gradient-to-r from-[#056DAE] to-[#0a7bc2] px-8 lg:px-12 py-10 text-white">
+                    <div class="flex flex-wrap items-start justify-between gap-6">
+                        <div>
+                            <div class="inline-flex items-center gap-2 mb-4 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs">
+                                <span>CONFIDENTIAL – INTERNAL USE ONLY</span>
+                            </div>
+                            <h1 class="text-3xl lg:text-[40px] font-bold tracking-tight">SlideForge</h1>
+                            <p class="mt-2 text-lg text-blue-100 max-w-2xl">Citigroup AI Presentation Generator powered by Gemini 1.5 Pro</p>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-5xl font-light opacity-20">PRD</div>
+                            <div class="text-sm mt-1">Version 1.0 • June 2026</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="px-6 lg:px-12 py-10 space-y-16">
+                    <!-- 1 -->
+                    <section id="document-control" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">1</span>Document Control</h2>
+                        <div class="mt-6 overflow-x-auto">
+                            <table class="w-full text-[14px] border border-slate-200 rounded-xl overflow-hidden">
+                                <tbody class="divide-y divide-slate-200">
+                                    <tr class="bg-slate-50/70"><td class="w-48 px-4 py-2.5 font-medium text-slate-600">Version</td><td class="px-4 py-2.5">1.0 (Final for Engineering)</td></tr>
+                                    <tr><td class="px-4 py-2.5 font-medium text-slate-600">Author</td><td class="px-4 py-2.5">Product Management – Enterprise Productivity, AI Solutions</td></tr>
+                                    <tr class="bg-slate-50/70"><td class="px-4 py-2.5 font-medium text-slate-600">Date</td><td class="px-4 py-2.5">June 7, 2026</td></tr>
+                                    <tr><td class="px-4 py-2.5 font-medium text-slate-600">Classification</td><td class="px-4 py-2.5">Citi Internal – Confidential</td></tr>
+                                    <tr class="bg-slate-50/70"><td class="px-4 py-2.5 font-medium text-slate-600">Stakeholders</td><td class="px-4 py-2.5">
+                                        <ul class="list-disc pl-5 space-y-1">
+                                            <li>ICG Banking, Markets, Wealth – End Users</li>
+                                            <li>Global Brand Management & Marketing</li>
+                                            <li>CISO – Information Security</li>
+                                            <li>Enterprise Technology Services (ETS)</li>
+                                            <li>Legal & Compliance, Records Management</li>
+                                        </ul>
+                                    </td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <!-- 2 -->
+                    <section id="executive-summary" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">2</span>Executive Summary</h2>
+                        <div class="mt-4 grid lg:grid-cols-3 gap-6">
+                            <div class="lg:col-span-2 prose prose-slate max-w-none text-[14.5px] leading-relaxed">
+                                <p><strong>Problem:</strong> Citi bankers and staff spend 30-40% of pitch preparation time formatting slides, reconciling brand standards, and manually redacting non-compliant language. Current AI tools are blocked or lack enterprise controls, creating shadow IT risk.</p>
+                                <p class="mt-3"><strong>Solution – SlideForge:</strong> A secure, internal web application that uses <strong>Google Gemini 1.5 Pro via Vertex AI</strong> to generate first-draft PowerPoint decks from a natural language prompt, structured data upload, or meeting notes. All output is rendered through the Citi Template Engine using python-pptx, ensuring 100% brand compliance.</p>
+                                <p class="mt-3"><strong>Key Differentiation:</strong> Unlike public tools, SlideForge enforces Citi Blue (#056DAE) master layouts, auto-applies disclaimers, blocks client MNPI from model training, and logs every generation for audit. No prompts or content are retained beyond 30 minutes.</p>
+                            </div>
+                            <div class="bg-[#F5F7FA] border border-slate-200 rounded-xl p-5">
+                                <h4 class="font-semibold text-[13px] uppercase tracking-wide text-slate-600">Technology Stack</h4>
+                                <ul class="mt-3 space-y-2 text-[13.5px]">
+                                    <li class="flex justify-between"><span>LLM</span><span class="font-medium">Gemini 1.5 Pro (Vertex)</span></li>
+                                    <li class="flex justify-between"><span>Frontend</span><span class="font-medium">React + TypeScript</span></li>
+                                    <li class="flex justify-between"><span>Backend</span><span class="font-medium">FastAPI (Python)</span></li>
+                                    <li class="flex justify-between"><span>Generation</span><span class="font-medium">python-pptx</span></li>
+                                    <li class="flex justify-between"><span>Hosting</span><span class="font-medium">GCP US-East (Citi VPC)</span></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 3 -->
+                    <section id="goals" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">3</span>Goals and Non-Goals</h2>
+                        <div class="mt-6 grid md:grid-cols-2 gap-6">
+                            <div class="border border-emerald-200 bg-emerald-50/50 rounded-xl p-5">
+                                <h3 class="font-semibold text-emerald-800 mb-3">IN SCOPE – Goals</h3>
+                                <ul class="space-y-2 text-[14px] list-disc pl-5">
+                                    <li>Reduce deck creation time by >60% for standard pitches</li>
+                                    <li>Generate client-ready PPTX in Citi master template automatically</li>
+                                    <li>Enforce brand, legal disclaimers, and accessibility (WCAG AA)</li>
+                                    <li>Support prompt-to-deck and data-to-chart workflows</li>
+                                    <li>Meet Citi security: no model training, US data residency, full audit</li>
+                                </ul>
+                            </div>
+                            <div class="border border-red-200 bg-red-50/50 rounded-xl p-5">
+                                <h3 class="font-semibold text-red-800 mb-3">OUT OF SCOPE – Non-Goals</h3>
+                                <ul class="space-y-2 text-[14px] list-disc pl-5">
+                                    <li>Real-time collaborative editing (use PowerPoint after export)</li>
+                                    <li>Image generation or video creation</li>
+                                    <li>Integration with external LLMs (ChatGPT, Claude)</li>
+                                    <li>Automated email distribution to clients</li>
+                                    <li>Long-term content library or slide repository (V2)</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 4 -->
+                    <section id="personas" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">4</span>Personas</h2>
+                        <div class="mt-6 grid md:grid-cols-3 gap-5">
+                            <div class="border rounded-xl p-5">
+                                <div class="w-10 h-10 rounded-lg bg-[#056DAE] text-white flex items-center justify-center font-bold">P</div>
+                                <h4 class="font-semibold mt-3">Presenter (Banker/Associate)</h4>
+                                <p class="text-[13.5px] text-slate-600 mt-1">Needs a quality first draft in <20 minutes. Non-designer. Primary user.</p>
+                                <p class="text-[12px] mt-2"><strong>Pain:</strong> Manual formatting, inconsistent decks.</p>
+                            </div>
+                            <div class="border rounded-xl p-5">
+                                <div class="w-10 h-10 rounded-lg bg-[#E31837] text-white flex items-center justify-center font-bold">B</div>
+                                <h4 class="font-semibold mt-3">Brand Manager</h4>
+                                <p class="text-[13.5px] text-slate-600 mt-1">Ensures every deck meets Citi standards, logos, fonts, disclosures.</p>
+                                <p class="text-[12px] mt-2"><strong>Pain:</strong> Off-brand decks sent to clients.</p>
+                            </div>
+                            <div class="border rounded-xl p-5">
+                                <div class="w-10 h-10 rounded-lg bg-slate-700 text-white flex items-center justify-center font-bold">S</div>
+                                <h4 class="font-semibold mt-3">IT Security</h4>
+                                <p class="text-[13.5px] text-slate-600 mt-1">Requires zero data leakage, no training, full logging, SSO.</p>
+                                <p class="text-[12px] mt-2"><strong>Pain:</strong> Unapproved AI tools.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 5 -->
+                    <section id="user-stories" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">5</span>User Stories (with Acceptance Criteria)</h2>
+                        <div class="mt-6 overflow-x-auto">
+                            <table class="w-full text-[13px] border border-slate-200">
+                                <thead class="bg-slate-50 text-[12px] uppercase tracking-wide">
+                                    <tr><th class="px-3 py-2 text-left w-16">ID</th><th class="px-3 py-2 text-left">Story</th><th class="px-3 py-2 text-left">Acceptance Criteria</th></tr>
+                                </thead>
+                                <tbody class="divide-y">
+                                    <tr><td class="px-3 py-2 font-mono">US-01</td><td class="px-3 py-2"><strong>As Presenter,</strong> I want to enter a prompt and select deck type so I get a draft deck.</td><td class="px-3 py-2">Gemini returns JSON with 6-9 slides in <30s; UI shows progress.</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2 font-mono">US-02</td><td class="px-3 py-2"><strong>As Presenter,</strong> I want to upload Excel so charts are auto-generated.</td><td class="px-3 py-2">CSV/XLSX parsed, Gemini suggests chart type, python-pptx renders branded chart.</td></tr>
+                                    <tr><td class="px-3 py-2 font-mono">US-03</td><td class="px-3 py-2"><strong>As Presenter,</strong> I want one-click PPTX export in Citi template.</td><td class="px-3 py-2">File opens in PowerPoint, uses Citi master, fonts Arial/Calibri, colors #056DAE/#E31837.</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2 font-mono">US-04</td><td class="px-3 py-2"><strong>As Brand Manager,</strong> I want forced disclaimers on client decks.</td><td class="px-3 py-2">“Confidential” footer + standard risk disclosure auto-added, non-removable in template.</td></tr>
+                                    <tr><td class="px-3 py-2 font-mono">US-05</td><td class="px-3 py-2"><strong>As Presenter,</strong> I want to refine a slide with “make shorter”.</td><td class="px-3 py-2">Refine API calls Gemini with context, updates slide in <10s.</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2 font-mono">US-06</td><td class="px-3 py-2"><strong>As IT Security,</strong> I want SSO via Citi ID.</td><td class="px-3 py-2">SAML2 login required, MFA enforced, session 8hrs.</td></tr>
+                                    <tr><td class="px-3 py-2 font-mono">US-07</td><td class="px-3 py-2"><strong>As Compliance,</strong> I want no prompt data retained.</td><td class="px-3 py-2">Logs show metadata only; prompts purged from memory + Vertex after 30 min.</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2 font-mono">US-08</td><td class="px-3 py-2"><strong>As Presenter,</strong> I want speaker notes generated.</td><td class="px-3 py-2">Gemini creates 2-3 sentence notes per slide, included in PPTX.</td></tr>
+                                    <tr><td class="px-3 py-2 font-mono">US-09</td><td class="px-3 py-2"><strong>As Brand Manager,</strong> I want logo lockup control.</td><td class="px-3 py-2">Citi logo top-right, size fixed, cannot be moved by user.</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2 font-mono">US-10</td><td class="px-3 py-2"><strong>As IT,</strong> I want audit logs for every generation.</td><td class="px-3 py-2">User, timestamp, deck type, tokens → Splunk, retained 7 years.</td></tr>
+                                    <tr><td class="px-3 py-2 font-mono">US-11</td><td class="px-3 py-2"><strong>As Presenter,</strong> I want mobile preview.</td><td class="px-3 py-2">Responsive UI shows slide thumbnails on phone.</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2 font-mono">US-12</td><td class="px-3 py-2"><strong>As Legal,</strong> I want prohibited terms blocked.</td><td class="px-3 py-2">DLP/lexicon flags “guarantee returns” etc., Gemini rewrites.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <!-- 6 -->
+                    <section id="scope" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">6</span>Product Scope – MVP vs V2</h2>
+                        <div class="mt-6 overflow-x-auto">
+                            <table class="w-full text-[14px] border">
+                                <thead class="bg-[#056DAE] text-white"><tr><th class="px-4 py-2.5 text-left">Capability</th><th class="px-4 py-2.5 text-left w-1/3">MVP (Weeks 1-10)</th><th class="px-4 py-2.5 text-left w-1/3">V2 (Q4 2026)</th></tr></thead>
+                                <tbody class="divide-y">
+                                    <tr><td class="px-4 py-2.5 font-medium">Deck Types</td><td class="px-4 py-2.5">Sales/Client 9-slide, Internal 6-slide</td><td class="px-4 py-2.5">Earnings, Town Hall, Training</td></tr>
+                                    <tr class="bg-slate-50"><td class="px-4 py-2.5 font-medium">Inputs</td><td class="px-4 py-2.5">Text prompt, .xlsx/.csv upload</td><td class="px-4 py-2.5">Outlook email, Teams transcript</td></tr>
+                                    <tr><td class="px-4 py-2.5 font-medium">Output</td><td class="px-4 py-2.5">PPTX download only</td><td class="px-4 py-2.5">Direct save to SharePoint</td></tr>
+                                    <tr class="bg-slate-50"><td class="px-4 py-2.5 font-medium">Languages</td><td class="px-4 py-2.5">English</td><td class="px-4 py-2.5">EN, ES, ZH</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <!-- 7 -->
+                    <section id="functional" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">7</span>Functional Requirements</h2>
+                        <div class="mt-6 overflow-x-auto">
+                            <table class="w-full text-[13px] border">
+                                <thead class="bg-slate-100 text-[11px] uppercase"><tr><th class="px-2 py-2">ID</th><th class="px-2 py-2 text-left">Requirement</th><th class="px-2 py-2 text-left">Description</th><th class="px-2 py-2">Priority</th><th class="px-2 py-2">Gemini API</th></tr></thead>
+                                <tbody class="divide-y">
+                                    <tr><td class="px-2 py-2 font-mono">FR-001</td><td class="px-2 py-2">Prompt Interface</td><td class="px-2 py-2">5000-char text area with examples</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-red-100 text-red-700 rounded">P0</span></td><td class="px-2 py-2 text-center">Yes</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-2 py-2 font-mono">FR-002</td><td class="px-2 py-2">Deck Type Selector</td><td class="px-2 py-2">Sales (9) or Internal (6) – drives system prompt</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-red-100 text-red-700 rounded">P0</span></td><td class="px-2 py-2 text-center">Yes</td></tr>
+                                    <tr><td class="px-2 py-2 font-mono">FR-003</td><td class="px-2 py-2">Content Generation</td><td class="px-2 py-2">Gemini 1.5 Pro returns structured JSON (title, bullets, notes)</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-red-100 text-red-700 rounded">P0</span></td><td class="px-2 py-2 text-center">Yes</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-2 py-2 font-mono">FR-004</td><td class="px-2 py-2">Brand Template Engine</td><td class="px-2 py-2">python-pptx applies Citi master (.potx), fonts, colors #056DAE/#E31837</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-red-100 text-red-700 rounded">P0</span></td><td class="px-2 py-2 text-center">No</td></tr>
+                                    <tr><td class="px-2 py-2 font-mono">FR-005</td><td class="px-2 py-2">PPTX Export</td><td class="px-2 py-2">Downloadable .pptx <15MB</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-red-100 text-red-700 rounded">P0</span></td><td class="px-2 py-2 text-center">No</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-2 py-2 font-mono">FR-006</td><td class="px-2 py-2">Data Upload</td><td class="px-2 py-2">Parse XLSX/CSV, summarize with Gemini</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded">P1</span></td><td class="px-2 py-2 text-center">Yes</td></tr>
+                                    <tr><td class="px-2 py-2 font-mono">FR-007</td><td class="px-2 py-2">Chart Generation</td><td class="px-2 py-2">Auto bar/line/waterfall via python-pptx</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded">P1</span></td><td class="px-2 py-2 text-center">Indirect</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-2 py-2 font-mono">FR-008</td><td class="px-2 py-2">Refine Slide</td><td class="px-2 py-2">“Shorter”, “More formal”, “Add data” actions</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded">P1</span></td><td class="px-2 py-2 text-center">Yes</td></tr>
+                                    <tr><td class="px-2 py-2 font-mono">FR-009</td><td class="px-2 py-2">Compliance Filter</td><td class="px-2 py-2">Pre/post prompt DLP, block guarantees</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-red-100 text-red-700 rounded">P0</span></td><td class="px-2 py-2 text-center">Yes</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-2 py-2 font-mono">FR-010</td><td class="px-2 py-2">Audit Logging</td><td class="px-2 py-2">Immutable logs to Splunk: user, time, tokens, no content</td><td class="px-2 py-2 text-center"><span class="px-2 py-0.5 bg-red-100 text-red-700 rounded">P0</span></td><td class="px-2 py-2 text-center">No</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <!-- 8 -->
+                    <section id="decks" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">8</span>Recommended Deck Structures</h2>
+                        <div class="mt-6">
+                            <div class="flex gap-2 border-b">
+                                <button data-tab="sales" class="tab-btn px-4 py-2 text-[14px] font-medium border-b-2 border-[#056DAE] text-[#056DAE]">Sales / Client (9 slides)</button>
+                                <button data-tab="internal" class="tab-btn px-4 py-2 text-[14px] font-medium border-b-2 border-transparent text-slate-500">Internal (6 slides)</button>
+                            </div>
+                            <div id="panel-sales" class="tab-panel mt-4">
+                                <table class="w-full text-[13.5px] border">
+                                    <thead class="bg-slate-50"><tr><th class="px-3 py-2 w-12">#</th><th class="px-3 py-2 text-left">Slide</th><th class="px-3 py-2 text-left">Gemini Content Rules</th></tr></thead>
+                                    <tbody class="divide-y">
+                                        <tr><td class="px-3 py-2">1</td><td class="px-3 py-2 font-medium">Title</td><td class="px-3 py-2">Client name, date, “Confidential”, Citi Blue header</td></tr>
+                                        <tr class="bg-slate-50/50"><td class="px-3 py-2">2</td><td class="px-3 py-2 font-medium">Executive Summary</td><td class="px-3 py-2">3 bullets max, 12 words each, outcome-focused</td></tr>
+                                        <tr><td class="px-3 py-2">3</td><td class="px-3 py-2 font-medium">Situation</td><td class="px-3 py-2">Client context, no assumptions, cite uploaded data only</td></tr>
+                                        <tr class="bg-slate-50/50"><td class="px-3 py-2">4</td><td class="px-3 py-2 font-medium">Citi Solution</td><td class="px-3 py-2">Product fit, avoid guarantees, use “may/could”</td></tr>
+                                        <tr><td class="px-3 py-2">5-6</td><td class="px-3 py-2 font-medium">Deep Dive</td><td class="px-3 py-2">Features + benefits, chart if data provided</td></tr>
+                                        <tr class="bg-slate-50/50"><td class="px-3 py-2">7</td><td class="px-3 py-2 font-medium">Why Citi</td><td class="px-3 py-2">Differentiators, global network, no competitor claims</td></tr>
+                                        <tr><td class="px-3 py-2">8</td><td class="px-3 py-2 font-medium">Case Study</td><td class="px-3 py-2">Anonymized proof point</td></tr>
+                                        <tr class="bg-slate-50/50"><td class="px-3 py-2">9</td><td class="px-3 py-2 font-medium">Next Steps</td><td class="px-3 py-2">3 actions + full risk disclosure footer (auto)</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div id="panel-internal" class="tab-panel mt-4 hidden">
+                                <table class="w-full text-[13.5px] border">
+                                    <thead class="bg-slate-50"><tr><th class="px-3 py-2 w-12">#</th><th class="px-3 py-2 text-left">Slide</th><th class="px-3 py-2 text-left">Gemini Content Rules</th></tr></thead>
+                                    <tbody class="divide-y">
+                                        <tr><td class="px-3 py-2">1</td><td class="px-3 py-2 font-medium">Title</td><td class="px-3 py-2">Project name, owner, date</td></tr>
+                                        <tr class="bg-slate-50/50"><td class="px-3 py-2">2</td><td class="px-3 py-2 font-medium">Objective</td><td class="px-3 py-2">1 sentence problem statement</td></tr>
+                                        <tr><td class="px-3 py-2">3</td><td class="px-3 py-2 font-medium">Key Findings</td><td class="px-3 py-2">3-5 bullets, data-driven</td></tr>
+                                        <tr class="bg-slate-50/50"><td class="px-3 py-2">4</td><td class="px-3 py-2 font-medium">Analysis</td><td class="px-3 py-2">Chart from upload, Gemini-written insight</td></tr>
+                                        <tr><td class="px-3 py-2">5</td><td class="px-3 py-2 font-medium">Recommendation</td><td class="px-3 py-2">Clear next step, owner, timeline</td></tr>
+                                        <tr class="bg-slate-50/50"><td class="px-3 py-2">6</td><td class="px-3 py-2 font-medium">Risks/Appendix</td><td class="px-3 py-2">Risks, assumptions, backup data</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 9 -->
+                    <section id="architecture" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">9</span>System Architecture</h2>
+                        <div class="mt-6 bg-[#F5F7FA] border rounded-xl p-6">
+                            <div class="flex flex-col lg:flex-row items-center justify-between gap-4 text-[13px]">
+                                <div class="px-4 py-3 bg-white border-2 border-[#056DAE] rounded-lg shadow-sm text-center"><div class="font-semibold">React Frontend</div><div class="text-[11px] text-slate-500">Cloud Run • SSO</div></div>
+                                <div class="text-slate-400">→</div>
+                                <div class="px-4 py-3 bg-white border-2 border-slate-300 rounded-lg shadow-sm text-center"><div class="font-semibold">FastAPI Backend</div><div class="text-[11px] text-slate-500">Python 3.11</div></div>
+                                <div class="text-slate-400">→</div>
+                                <div class="px-4 py-3 bg-white border-2 border-[#E31837] rounded-lg shadow-sm text-center"><div class="font-semibold">Gemini 1.5 Pro</div><div class="text-[11px] text-slate-500">Vertex AI • US</div></div>
+                            </div>
+                            <div class="mt-4 flex flex-col lg:flex-row items-center justify-center gap-4 text-[13px]">
+                                <div class="px-4 py-2 bg-white border rounded-lg">python-pptx Template Engine</div>
+                                <div class="px-4 py-2 bg-white border rounded-lg">Secret Manager (API Keys)</div>
+                                <div class="px-4 py-2 bg-white border rounded-lg">Cloud Storage (temp 30min)</div>
+                            </div>
+                            <p class="text-[12px] text-slate-600 mt-4 text-center"><strong>Data Flow:</strong> No persistent storage of prompts. Request → DLP scan → Gemini → JSON → PPTX render → signed URL (expires 30min) → purge.</p>
+                        </div>
+                    </section>
+
+                    <!-- 10 -->
+                    <section id="privacy" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">10</span>Data Flow and Privacy – Banking Compliance</h2>
+                        <ul class="mt-4 space-y-3 text-[14px]">
+                            <li class="flex gap-3"><span class="text-emerald-600">✓</span><span><strong>No Training:</strong> Contract with Google ensures Citi data is NOT used to train Gemini models.</span></li>
+                            <li class="flex gap-3"><span class="text-emerald-600">✓</span><span><strong>Data Residency:</strong> Vertex AI endpoints locked to us-central1 and us-east4.</span></li>
+                            <li class="flex gap-3"><span class="text-emerald-600">✓</span><span><strong>Encryption:</strong> TLS 1.3 in transit, AES-256 at rest, CMEK keys rotated 90 days.</span></li>
+                            <li class="flex gap-3"><span class="text-emerald-600">✓</span><span><strong>Ephemeral:</strong> Prompts, files, and generated PPTX auto-deleted after 30 minutes.</span></li>
+                            <li class="flex gap-3"><span class="text-emerald-600">✓</span><span><strong>Audit:</strong> Every call logged to Splunk (user, time, model, tokens, deck type). Content never logged.</span></li>
+                        </ul>
+                    </section>
+
+                    <!-- 11 -->
+                    <section id="uiux" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">11</span>UI/UX Flow</h2>
+                        <div class="mt-6 grid md:grid-cols-5 gap-4">
+                            <div class="border rounded-lg p-4 bg-white"><div class="text-[11px] text-slate-500">Step 1</div><div class="font-semibold mt-1">Login</div><p class="text-[12px] mt-1">Citi SSO, MFA</p></div>
+                            <div class="border rounded-lg p-4 bg-white"><div class="text-[11px] text-slate-500">Step 2</div><div class="font-semibold mt-1">Create</div><p class="text-[12px] mt-1">Prompt + deck type + optional file</p></div>
+                            <div class="border rounded-lg p-4 bg-white"><div class="text-[11px] text-slate-500">Step 3</div><div class="font-semibold mt-1">Generate</div><p class="text-[12px] mt-1">Progress bar, Gemini streaming</p></div>
+                            <div class="border rounded-lg p-4 bg-white"><div class="text-[11px] text-slate-500">Step 4</div><div class="font-semibold mt-1">Preview</div><p class="text-[12px] mt-1">Edit bullets, refine with AI</p></div>
+                            <div class="border rounded-lg p-4 bg-white"><div class="text-[11px] text-slate-500">Step 5</div><div class="font-semibold mt-1">Export</div><p class="text-[12px] mt-1">Download PPTX, auto audit</p></div>
+                        </div>
+                    </section>
+
+                    <!-- 12 -->
+                    <section id="api" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">12</span>API Specifications</h2>
+                        <div class="mt-4 grid lg:grid-cols-2 gap-6">
+                            <div>
+                                <h4 class="font-semibold text-[13px] uppercase tracking-wide mb-2">Internal Endpoints (FastAPI)</h4>
+                                <pre class="bg-slate-900 text-slate-100 p-4 rounded-lg text-[12px] overflow-x-auto mono">POST /api/v1/generate
+{
+  "prompt": "...",
+  "deck_type": "sales_9",
+  "file_id": "optional"
+}
+
+POST /api/v1/refine
+{
+  "slide_id": "3",
+  "instruction": "make shorter"
+}
+
+POST /api/v1/export
+→ returns signed URL .pptx</pre>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-[13px] uppercase tracking-wide mb-2">Gemini System Prompt (excerpt)</h4>
+                                <pre class="bg-slate-900 text-slate-100 p-4 rounded-lg text-[12px] overflow-x-auto mono">You are SlideForge for Citigroup.
+Return JSON only. Max 3 bullets per slide,
+12 words per bullet. Use Citi tone: clear,
+professional. Never guarantee returns.
+Add disclaimer text to slide 9. EN only.</pre>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 13-19 condensed for space but complete -->
+                    <section id="security" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">13</span>Security and Compliance</h2>
+                        <table class="mt-4 w-full text-[13.5px] border">
+                            <tbody class="divide-y">
+                                <tr><td class="px-3 py-2 font-medium bg-slate-50 w-52">SOC2 / ISO27001</td><td class="px-3 py-2">Inherit GCP controls, annual audit</td></tr>
+                                <tr><td class="px-3 py-2 font-medium bg-slate-50">API Keys</td><td class="px-3 py-2">Stored in GCP Secret Manager, rotated monthly</td></tr>
+                                <tr><td class="px-3 py-2 font-medium bg-slate-50">VPC Service Controls</td><td class="px-3 py-2">Perimeter around Vertex AI, Storage, Cloud Run</td></tr>
+                                <tr><td class="px-3 py-2 font-medium bg-slate-50">DLP</td><td class="px-3 py-2">Cloud DLP API scans prompts for MNPI, PII, blocks client account numbers</td></tr>
+                            </tbody>
+                        </table>
+                    </section>
+
+                    <section id="performance" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">14</span>Performance Requirements</h2>
+                        <div class="mt-4 grid md:grid-cols-3 gap-4 text-[14px]">
+                            <div class="border rounded-lg p-4"><div class="font-bold text-2xl citi-blue">&lt;45s</div><div class="text-slate-600">End-to-end for 10 slides</div></div>
+                            <div class="border rounded-lg p-4"><div class="font-bold text-2xl citi-blue">&lt;3s</div><div class="text-slate-600">Time to first token</div></div>
+                            <div class="border rounded-lg p-4"><div class="font-bold text-2xl citi-blue">99.5%</div><div class="text-slate-600">Uptime SLA</div></div>
+                        </div>
+                    </section>
+
+                    <section id="testing" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">15</span>Testing Plan</h2>
+                        <ul class="mt-4 text-[14px] space-y-2 list-disc pl-5">
+                            <li><strong>Unit:</strong> pytest for pptx generation, brand color validation</li>
+                            <li><strong>Integration:</strong> Mock Gemini responses, test DLP blocking</li>
+                            <li><strong>UAT:</strong> 20 bankers + Brand team, 50 test prompts, brand compliance 100%</li>
+                            <li><strong>Pen Test:</strong> ETS Red Team before prod</li>
+                        </ul>
+                    </section>
+
+                    <section id="metrics" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">16</span>Success Metrics</h2>
+                        <div class="mt-4 grid md:grid-cols-4 gap-4 text-[13.5px]">
+                            <div class="bg-[#F5F7FA] p-4 rounded-lg border"><div class="font-semibold">Time Saved</div><div class="text-2xl font-bold mt-1">>60%</div></div>
+                            <div class="bg-[#F5F7FA] p-4 rounded-lg border"><div class="font-semibold">Brand Compliance</div><div class="text-2xl font-bold mt-1">100%</div></div>
+                            <div class="bg-[#F5F7FA] p-4 rounded-lg border"><div class="font-semibold">Adoption (3mo)</div><div class="text-2xl font-bold mt-1">70%+</div></div>
+                            <div class="bg-[#F5F7FA] p-4 rounded-lg border"><div class="font-semibold">NPS</div><div class="text-2xl font-bold mt-1">>50</div></div>
+                        </div>
+                    </section>
+
+                    <section id="timeline" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">17</span>Timeline – 8-10 Week Plan</h2>
+                        <div class="mt-4 overflow-x-auto">
+                            <table class="w-full text-[13px] border">
+                                <thead class="bg-slate-50"><tr><th class="px-3 py-2 text-left">Week</th><th class="px-3 py-2 text-left">Milestone</th><th class="px-3 py-2 text-left">Owner</th></tr></thead>
+                                <tbody class="divide-y">
+                                    <tr><td class="px-3 py-2">1-2</td><td class="px-3 py-2">Architecture + Security Review, Vertex AI provisioning</td><td class="px-3 py-2">ETS</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2">3-4</td><td class="px-3 py-2">FastAPI backend, Gemini integration, DLP</td><td class="px-3 py-2">Eng</td></tr>
+                                    <tr><td class="px-3 py-2">5-6</td><td class="px-3 py-2">React UI, pptx template engine, brand lock</td><td class="px-3 py-2">Eng/Brand</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2">7</td><td class="px-3 py-2">Integration testing, performance tuning</td><td class="px-3 py-2">QA</td></tr>
+                                    <tr><td class="px-3 py-2">8</td><td class="px-3 py-2">Security pen test, compliance sign-off</td><td class="px-3 py-2">CISO</td></tr>
+                                    <tr class="bg-slate-50/50"><td class="px-3 py-2">9</td><td class="px-3 py-2">UAT with Banking</td><td class="px-3 py-2">Product</td></tr>
+                                    <tr><td class="px-3 py-2">10</td><td class="px-3 py-2">Production launch (pilot 200 users)</td><td class="px-3 py-2">All</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section id="risks" class="scroll-mt-24">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">18</span>Risks and Mitigations</h2>
+                        <table class="mt-4 w-full text-[13.5px] border">
+                            <thead class="bg-red-50"><tr><th class="px-3 py-2 text-left">Risk</th><th class="px-3 py-2 text-left">Impact</th><th class="px-3 py-2 text-left">Mitigation</th></tr></thead>
+                            <tbody class="divide-y">
+                                <tr><td class="px-3 py-2">Hallucinated financial data</td><td class="px-3 py-2">High</td><td class="px-3 py-2">System prompt: “cite only provided data”; DLP + human review required</td></tr>
+                                <tr class="bg-slate-50/50"><td class="px-3 py-2">Model latency >45s</td><td class="px-3 py-2">Med</td><td class="px-3 py-2">Use Gemini 1.5 Pro streaming, cache templates, async generation</td></tr>
+                                <tr><td class="px-3 py-2">Brand non-compliance</td><td class="px-3 py-2">High</td><td class="px-3 py-2">python-pptx locks master; no user font/color override</td></tr>
+                            </tbody>
+                        </table>
+                    </section>
+
+                    <section id="questions" class="scroll-mt-24 pb-4">
+                        <h2 class="text-[22px] font-bold citi-blue flex items-center gap-3"><span class="w-8 h-8 rounded-lg bg-[#056DAE]/10 flex items-center justify-center text-[15px] font-semibold">19</span>Open Questions</h2>
+                        <div class="mt-4 p-5 border border-emerald-200 bg-emerald-50 rounded-xl">
+                            <p class="text-[14px] font-medium text-emerald-800">None – All decisions finalized in Design Review on June 3, 2026.</p>
+                            <p class="text-[13px] text-emerald-700 mt-1">Approved by: Product, Brand, CISO, Legal, ETS Architecture Board.</p>
+                        </div>
+                    </section>
+                </div>
+
+                <div class="border-t bg-slate-50 px-8 lg:px-12 py-6 text-[12px] text-slate-500 flex flex-wrap justify-between gap-4">
+                    <span>© 2026 Citigroup Inc. Confidential – Internal Use Only</span>
+                    <span>SlideForge PRD v1.0 • Powered by Gemini 1.5 Pro on Vertex AI</span>
+                </div>
+            </article>
+        </main>
+    </div>
+
+    <script>
+        // Tabs
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => {
+                    b.classList.remove('border-[#056DAE]', 'text-[#056DAE]');
+                    b.classList.add('border-transparent', 'text-slate-500');
+                });
+                btn.classList.add('border-[#056DAE]', 'text-[#056DAE]');
+                btn.classList.remove('border-transparent', 'text-slate-500');
+                document.getElementById('panel-sales').classList.toggle('hidden', btn.dataset.tab !== 'sales');
+                document.getElementById('panel-internal').classList.toggle('hidden', btn.dataset.tab !== 'internal');
+            });
+        });
+
+        // Scrollspy
+        const links = document.querySelectorAll('.toc-link');
+        const sections = [...links].map(l => document.querySelector(l.getAttribute('href')));
+        const observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
+                if(entry.isIntersecting){
+                    links.forEach(l => l.classList.remove('bg-[#056DAE]/10', 'text-[#056DAE]', 'font-medium'));
+                    const active = document.querySelector(`.toc-link[href="#${entry.target.id}"]`);
+                    if(active) active.classList.add('bg-[#056DAE]/10', 'text-[#056DAE]', 'font-medium');
+                }
+            });
+        }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 });
+        sections.forEach(s => s && observer.observe(s));
+
+        // Share
+        document.getElementById('copy-link').addEventListener('click', (e) => {
+            navigator.clipboard.writeText(window.location.href);
+            e.target.textContent = 'Copied!';
+            setTimeout(() => e.target.textContent = 'Share', 1500);
+        });
+    </script>
+<script>(function(){document.addEventListener("click",function(e){var a=e.target.closest("[data-product-id]");if(!a)return;e.preventDefault();var pid=a.getAttribute("data-product-id");if(pid)parent.postMessage({type:"ecto-artifact-link-click",productId:pid},"*")})})();</script>
+</body>
+</html>

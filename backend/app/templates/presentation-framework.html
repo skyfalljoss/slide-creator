@@ -1,0 +1,932 @@
+<!doctype html>
+<html lang="en"><head><script data-od-sandbox-shim="">(function(){
+  function makeStore(){
+    var data = {};
+    var api = {
+      getItem: function(k){ return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; },
+      setItem: function(k, v){ data[k] = String(v); },
+      removeItem: function(k){ delete data[k]; },
+      clear: function(){ data = {}; },
+      key: function(i){ return Object.keys(data)[i] || null; }
+    };
+    Object.defineProperty(api, 'length', { get: function(){ return Object.keys(data).length; } });
+    return api;
+  }
+  function tryShim(name){
+    var works = false;
+    try { works = !!window[name] && typeof window[name].getItem === 'function'; void window[name].length; }
+    catch (_) { works = false; }
+    if (works) return;
+    try { Object.defineProperty(window, name, { configurable: true, value: makeStore() }); }
+    catch (_) { try { window[name] = makeStore(); } catch (__) {} }
+  }
+  tryShim('localStorage');
+  tryShim('sessionStorage');
+  document.addEventListener('click', (e) => {
+    if (!e.target || !(e.target instanceof Element)) return;
+    var link = e.target.closest('a[href]');
+    if (!link) return;
+    var href = link.getAttribute('href');
+    if (href === null) return;
+    var isAnchor = href.startsWith('#') || href === '';
+    if (isAnchor) {
+      e.preventDefault();
+      if (href === '' || href === '#') {
+        window.scrollTo({ top: 0 });
+        history.replaceState(null, '', ' ');
+      } else {
+        var targetId = href.slice(1);
+        var target = targetId ? document.getElementById(targetId) : null;
+        if (target) {
+          target.scrollIntoView();
+          location.hash === href && history.replaceState(null, '', ' ');
+          location.hash = href;
+        }
+      }
+    } else if (link.getAttribute('target') === '_blank') {
+      e.preventDefault();
+      let safe = false;
+      try {
+        var url = new URL(href, location.href);
+        safe =
+          url.protocol === 'http:' ||
+          url.protocol === 'https:' ||
+          url.protocol === 'mailto:';
+      } catch (_) {}
+      safe && window.open(href, '_blank', 'noopener,noreferrer');
+    }
+  });
+})();</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Citi Presentation Framework</title>
+  <style>
+    /* ===========================================================
+       Deck framework — DO NOT EDIT the rules in this <style> block.
+       Edit only inside the second <style> block below (per-deck
+       styles) and inside <section class="slide"> bodies.
+       =========================================================== */
+    :root {
+      /* Citi Brand Colors */
+      --bg:      #ffffff;
+      --surface: #f7f8f9;
+      --fg:      #003B70; /* Citi Navy */
+      --muted:   #5b6770;
+      --border:  #dce0e5;
+      --accent:  #EE2A24; /* Citi Red */
+      --shell:   #08090d;
+
+      --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+      --font-body:    -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+      --font-mono:    ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--shell);
+      color: var(--fg);
+      font: 18px/1.5 var(--font-body);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .deck-shell {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+    }
+    .deck-stage {
+      width: 1920px;
+      height: 1080px;
+      background: var(--bg);
+      position: relative;
+      transform-origin: top left;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+    }
+    .slide {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    .slide:not(.active) { display: none !important; }
+    :where(.slide.active) { display: flex; flex-direction: column; }
+
+    .deck-counter {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(10, 14, 26, 0.92);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      padding: 6px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #fff;
+      font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 0.18em;
+      z-index: 1000;
+    }
+    .deck-counter button {
+      width: 36px; height: 36px;
+      background: transparent;
+      color: #fff;
+      border: 0;
+      border-radius: 50%;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: background 0.15s;
+    }
+    .deck-counter button:hover { background: rgba(255, 255, 255, 0.12); }
+    .deck-counter button[disabled] { opacity: 0.3; cursor: default; }
+    .deck-counter .deck-count {
+      padding: 0 14px;
+      letter-spacing: 0.22em;
+    }
+    .deck-counter .deck-count .total { color: rgba(255, 255, 255, 0.5); }
+    .deck-hint {
+      position: fixed;
+      bottom: 26px;
+      right: 28px;
+      color: rgba(255, 255, 255, 0.4);
+      font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      z-index: 999;
+      pointer-events: none;
+    }
+
+    @media print {
+      @page { size: 1920px 1080px; margin: 0; }
+      html, body {
+        width: 1920px !important;
+        height: auto !important;
+        overflow: visible !important;
+        background: #fff !important;
+      }
+      .deck-shell {
+        position: static !important;
+        display: block !important;
+        inset: auto !important;
+      }
+      .deck-stage {
+        width: 1920px !important;
+        height: auto !important;
+        transform: none !important;
+        box-shadow: none !important;
+        position: static !important;
+      }
+      .slide {
+        display: flex !important;
+        position: relative !important;
+        inset: auto !important;
+        width: 1920px !important;
+        height: 1080px !important;
+        page-break-after: always;
+        break-after: page;
+      }
+      .slide:last-child { page-break-after: auto; break-after: auto; }
+      .deck-counter, .deck-hint { display: none !important; }
+    }
+  </style>
+  <style>
+    /* SLOT: per-deck styles */
+    
+    /* Global Brand Logo */
+    .brand-logo {
+      position: absolute;
+      top: 60px;
+      right: 80px;
+      height: 48px;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    .slide-content {
+      padding: 80px 120px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+    .header {
+      margin-bottom: 60px;
+    }
+    .label {
+      font-family: var(--font-body);
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+      font-size: 24px;
+      margin-bottom: 24px;
+    }
+    .title {
+      font-family: var(--font-display);
+      font-size: 80px;
+      line-height: 1.1;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--fg);
+    }
+    .subtitle {
+      font-family: var(--font-body);
+      font-size: 32px;
+      line-height: 1.4;
+      color: var(--muted);
+      margin-top: 24px;
+      max-width: 1200px;
+    }
+
+    /* Layouts */
+    .cover {
+      justify-content: center;
+      align-items: flex-start;
+      text-align: left;
+    }
+    .cover .title {
+      font-size: 120px;
+      max-width: 1400px;
+      margin: 0;
+    }
+    .cover .subtitle {
+      font-size: 40px;
+      margin: 40px 0 0;
+      max-width: 1000px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      flex: 1;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 60px;
+      flex: 1;
+    }
+    
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 48px;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: color-mix(in oklch, var(--accent) 15%, transparent);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 32px;
+    }
+    .card-icon svg {
+      width: 32px;
+      height: 32px;
+    }
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 36px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--fg);
+    }
+    .card-body {
+      font-family: var(--font-body);
+      font-size: 24px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    .big-stat {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      flex: 1;
+    }
+    .stat-number {
+      font-family: var(--font-display);
+      font-size: 240px;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      color: var(--accent);
+      line-height: 1;
+    }
+    .stat-label {
+      font-family: var(--font-body);
+      font-size: 48px;
+      color: var(--fg);
+      margin-top: 24px;
+      font-weight: 500;
+    }
+
+    .image-placeholder {
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: 24px;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-family: var(--font-body);
+      font-size: 24px;
+    }
+    
+    .table-custom {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      font-family: var(--font-body);
+    }
+    .table-custom th {
+      padding: 32px 24px;
+      font-size: 24px;
+      font-weight: 600;
+      text-align: left;
+      border-bottom: 2px solid var(--border);
+    }
+    .table-custom td {
+      padding: 40px 24px;
+      font-size: 28px;
+      font-weight: 500;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .quote-box {
+      border-left: 8px solid var(--accent);
+      padding-left: 48px;
+      margin-top: 40px;
+    }
+    .quote-text {
+      font-size: 48px;
+      line-height: 1.3;
+      font-family: var(--font-display);
+      font-weight: 500;
+      color: var(--fg);
+    }
+    .quote-author {
+      margin-top: 32px;
+      font-size: 24px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    .process-step {
+      display: flex;
+      gap: 32px;
+      align-items: flex-start;
+    }
+    .step-number {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--bg);
+      background: var(--accent);
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+  </style>
+<style data-od-tweaks-bridge-style="">
+[data-od-tweaks-hidden] .tw-panel {
+  transform: translateX(calc(100% + 32px)) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.tw-restore { display: none !important; }
+</style><script data-od-tweaks-bridge="">(function(){
+  // Synchronously hide BEFORE the artifact body parses so the panel never
+  // flashes on initial paint. The host removes the attribute via postMessage
+  // once it knows the desired state.
+  document.documentElement.setAttribute('data-od-tweaks-hidden', '');
+
+  var suppressEcho = false;
+  var observer = null;
+
+  function panelEl(){ return document.querySelector('.tw-panel'); }
+
+  function applyClassesToPanel(visible){
+    var panel = panelEl();
+    if (panel) panel.classList.toggle('tw-hidden', !visible);
+  }
+
+  function setPanelVisible(visible){
+    suppressEcho = true;
+    document.documentElement.toggleAttribute('data-od-tweaks-hidden', !visible);
+    applyClassesToPanel(visible);
+    // Clear flag after the MutationObserver has had a chance to fire for this
+    // change so we don't echo our own host-driven toggles back to the host.
+    Promise.resolve().then(function(){ suppressEcho = false; });
+  }
+
+  function postState(){
+    var panel = panelEl();
+    if (!panel) return;
+    try {
+      parent.postMessage({
+        type: 'od:tweaks-panel-state',
+        visible: !panel.classList.contains('tw-hidden'),
+      }, '*');
+    } catch (e) {}
+  }
+
+  function postAvailability(){
+    try {
+      parent.postMessage({
+        type: 'od:tweaks-available',
+        available: !!panelEl(),
+      }, '*');
+    } catch (e) {}
+  }
+
+  function attachObserver(){
+    var panel = panelEl();
+    if (!panel || observer) return;
+    observer = new MutationObserver(function(){
+      if (suppressEcho) return;
+      postState();
+    });
+    observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  function onReady(){
+    // Capture the panel authored visibility BEFORE we apply the host hidden
+    // attribute. The bridge sets data-od-tweaks-hidden synchronously in head
+    // (before the body parses), so on entry to onReady the attribute is
+    // always present even though the artifact may have authored the panel
+    // as default-visible. Reading the panel class first is the only place
+    // we can still observe the author intent. Then drive the attribute,
+    // classes, and posted state from that captured value so a default
+    // visible tw-panel reports visible:true and the toolbar toggle starts
+    // ON. Issue surfaced in PR #1643 review.
+    var panel = panelEl();
+    var initialVisible = !!panel && !panel.classList.contains('tw-hidden');
+    document.documentElement.toggleAttribute('data-od-tweaks-hidden', !initialVisible);
+    applyClassesToPanel(initialVisible);
+    attachObserver();
+    postAvailability();
+    // Post the captured initial visibility so the toolbar toggle reflects
+    // the default state on mount. Without this the toggle reads OFF while
+    // a default-visible tw-panel artifact clearly shows its panel and the
+    // user would have to click toggle-on then toggle-off to actually hide.
+    postState();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onReady);
+  } else {
+    onReady();
+  }
+
+  window.addEventListener('message', function(ev){
+    if (!ev.data || ev.data.type !== 'od:tweaks-panel-visible') return;
+    setPanelVisible(!!ev.data.visible);
+  });
+})();</script></head>
+<body>
+  <div class="deck-shell" data-od-id="path-0">
+    <div class="deck-stage" id="deck-stage" data-od-id="path-0-0">
+      
+      <!-- Citi Logo embedded at the top right of the stage -->
+      <img class="brand-logo" src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Citi.svg" alt="Citi">
+
+      <!-- Slide 01: Cover -->
+      <section class="slide active" data-screen-label="01 Cover">
+        <div class="slide-content cover" data-od-id="path-0-0-1-0">
+          <div class="label">Q3 2024 Review</div>
+          <div class="title">Enterprise Workflow Modernization</div>
+          <div class="subtitle">A strategic overview of our architecture and global impact.</div>
+        </div>
+      </section>
+
+      <!-- Slide 02: Big Statement -->
+      <section class="slide" data-screen-label="02 Big Idea">
+        <div class="slide-content" data-od-id="path-0-0-2-0">
+          <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; max-width: 1400px;">
+            <div class="label">The Core Insight</div>
+            <div class="title" style="font-size: 80px; line-height: 1.2;">
+              When infrastructure becomes invisible, global teams move <span style="color: var(--accent);">three times faster</span>.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 03: Three Points Grid -->
+      <section class="slide" data-screen-label="03 Three Pillars">
+        <div class="slide-content" data-od-id="path-0-0-3-0">
+          <div class="header">
+            <div class="title">Strategic Pillars</div>
+            <div class="subtitle">Our foundation for the next decade of growth.</div>
+          </div>
+          <div class="grid-3">
+            <div class="card">
+              <div class="card-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+              </div>
+              <div class="card-title">Velocity</div>
+              <div class="card-body">Accelerating deployment cycles from weeks down to hours through automated pipelines.</div>
+            </div>
+            <div class="card">
+              <div class="card-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+              </div>
+              <div class="card-title">Security</div>
+              <div class="card-body">Zero-trust architecture ensuring compliance across all regulatory environments.</div>
+            </div>
+            <div class="card">
+              <div class="card-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"></path></svg>
+              </div>
+              <div class="card-title">Scale</div>
+              <div class="card-body">Elastic infrastructure designed to handle peak volumes dynamically.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 04: Problem / Split -->
+      <section class="slide" data-screen-label="04 The Problem">
+        <div class="slide-content" data-od-id="path-0-0-4-0">
+          <div class="grid-2">
+            <div>
+              <div class="label">Current State</div>
+              <div class="title" style="font-size: 64px;">Legacy systems are slowing down innovation.</div>
+              <div class="subtitle" style="margin-top: 40px; font-size: 28px;">
+                Fragmented tooling and manual compliance checks are causing bottlenecks across all regional development hubs.
+              </div>
+            </div>
+            <div class="image-placeholder">
+              [ Architecture Diagram Placeholder ]
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 05: Big Stat -->
+      <section class="slide" data-screen-label="05 Impact">
+        <div class="slide-content" data-od-id="path-0-0-5-0">
+          <div class="big-stat">
+            <div class="stat-number">48%</div>
+            <div class="stat-label">Reduction in global infrastructure costs</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 06: Before & After -->
+      <section class="slide" data-screen-label="06 Before &amp; After">
+        <div class="slide-content" data-od-id="path-0-0-6-0">
+          <div class="header">
+            <div class="title">The Transition</div>
+            <div class="subtitle">Moving from manual to automated workflows.</div>
+          </div>
+          <div class="grid-2">
+            <div class="card" style="background: transparent; border-color: var(--muted);">
+              <div class="card-title" style="color: var(--muted);">2022: Manual Hand-offs</div>
+              <div class="card-body">
+                • 4 weeks average deployment<br>
+                • Reactive incident response<br>
+                • Siloed regional teams<br>
+                • High maintenance overhead
+              </div>
+            </div>
+            <div class="card" style="border-color: var(--accent);">
+              <div class="card-title" style="color: var(--accent);">2024: Automated CI/CD</div>
+              <div class="card-body" style="color: var(--fg);">
+                • 2 hours average deployment<br>
+                • Proactive self-healing systems<br>
+                • Unified global platform<br>
+                • Optimized operating margins
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 07: Table -->
+      <section class="slide" data-screen-label="07 Comparison">
+        <div class="slide-content" data-od-id="path-0-0-7-0">
+          <div class="header">
+            <div class="title">Platform Capabilities</div>
+          </div>
+          <table class="table-custom">
+            <thead>
+              <tr>
+                <th>Feature</th>
+                <th>Legacy Vendor</th>
+                <th>New Platform</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Automated Compliance</td>
+                <td style="color: var(--muted);">Partial</td>
+                <td style="color: var(--accent); font-weight: 600;">Native</td>
+              </tr>
+              <tr>
+                <td>Data Residency Controls</td>
+                <td style="color: var(--muted);">Manual</td>
+                <td style="color: var(--accent); font-weight: 600;">Automated</td>
+              </tr>
+              <tr>
+                <td>API Ecosystem</td>
+                <td style="color: var(--muted);">Restricted</td>
+                <td style="color: var(--accent); font-weight: 600;">Open &amp; Unified</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Slide 08: Process -->
+      <section class="slide" data-screen-label="08 Process">
+        <div class="slide-content" data-od-id="path-0-0-8-0">
+          <div class="header">
+            <div class="title">Implementation Timeline</div>
+          </div>
+          <div class="grid-3" style="margin-top: 40px; gap: 40px;">
+            <div class="process-step">
+              <div class="step-number">1</div>
+              <div>
+                <div class="card-title" style="font-size: 28px;">Audit</div>
+                <div class="card-body" style="font-size: 20px;">Comprehensive review of existing infrastructure.</div>
+              </div>
+            </div>
+            <div class="process-step">
+              <div class="step-number">2</div>
+              <div>
+                <div class="card-title" style="font-size: 28px;">Migrate</div>
+                <div class="card-body" style="font-size: 20px;">Phased rollout minimizing operational risk.</div>
+              </div>
+            </div>
+            <div class="process-step">
+              <div class="step-number">3</div>
+              <div>
+                <div class="card-title" style="font-size: 28px;">Scale</div>
+                <div class="card-body" style="font-size: 20px;">Global enablement and team onboarding.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 09: Quote -->
+      <section class="slide" data-screen-label="09 Vision">
+        <div class="slide-content" data-od-id="path-0-0-9-0">
+          <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+            <div class="quote-box">
+              <div class="quote-text">"By unifying our technology stack, we aren't just saving costs—we're creating a foundation that lets our teams build the future."</div>
+              <div class="quote-author">Jane Doe — Head of Global Infrastructure</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 10: Closing -->
+      <section class="slide" data-screen-label="10 Thank You">
+        <div class="slide-content cover" data-od-id="path-0-0-10-0">
+          <div class="label">Next Steps</div>
+          <div class="title">Thank You</div>
+          <div class="subtitle">Questions and open discussion.</div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Framework chrome -->
+  <nav class="deck-counter" role="navigation" aria-label="Deck navigation" data-od-id="path-1">
+    <button type="button" id="deck-prev" aria-label="Previous slide" data-od-id="path-1-0">‹</button>
+    <span class="deck-count"><span id="deck-cur" data-od-id="path-1-1-0">01</span> <span class="total">/ <span id="deck-total" data-od-id="path-1-1-1-0">10</span></span></span>
+    <button type="button" id="deck-next" aria-label="Next slide" data-od-id="path-1-2">›</button>
+  </nav>
+  <div class="deck-hint" data-od-id="path-2">← / → · space</div>
+
+  <script>
+    (function () {
+      var stage = document.getElementById('deck-stage');
+      var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+      var prev = document.getElementById('deck-prev');
+      var next = document.getElementById('deck-next');
+      var cur = document.getElementById('deck-cur');
+      var total = document.getElementById('deck-total');
+      var STORE = 'deck:idx:' + (location.pathname || '/');
+      var idx = 0;
+
+      function fit() {
+        var sw = window.innerWidth;
+        var sh = window.innerHeight;
+        var pad = 32;
+        var s = Math.min((sw - pad) / 1920, (sh - pad) / 1080);
+        if (!isFinite(s) || s <= 0) s = 1;
+        var tx = (sw - 1920 * s) / 2;
+        var ty = (sh - 1080 * s) / 2;
+        stage.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')';
+      }
+
+      function pad2(n) { return (n < 10 ? '0' : '') + n; }
+      function paint() {
+        slides.forEach(function (el, i) { el.classList.toggle('active', i === idx); });
+        if (cur) cur.textContent = pad2(idx + 1);
+        if (total) total.textContent = pad2(slides.length);
+        if (prev) prev.toggleAttribute('disabled', idx <= 0);
+        if (next) next.toggleAttribute('disabled', idx >= slides.length - 1);
+      }
+      function go(i) {
+        idx = Math.max(0, Math.min(slides.length - 1, i));
+        paint();
+        try { localStorage.setItem(STORE, String(idx)); } catch (_) {}
+      }
+      function onKey(e) {
+        var t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+        if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); go(idx + 1); }
+        else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(idx - 1); }
+        else if (e.key === 'Home') { e.preventDefault(); go(0); }
+        else if (e.key === 'End') { e.preventDefault(); go(slides.length - 1); }
+      }
+      window.addEventListener('keydown', onKey, true);
+      document.addEventListener('keydown', onKey, true);
+      if (prev) prev.addEventListener('click', function () { go(idx - 1); });
+      if (next) next.addEventListener('click', function () { go(idx + 1); });
+
+      document.body.setAttribute('tabindex', '-1');
+      document.body.style.outline = 'none';
+      function focusDeck() { try { window.focus(); document.body.focus({ preventScroll: true }); } catch (_) {} }
+      document.addEventListener('mousedown', focusDeck);
+      window.addEventListener('load', focusDeck);
+
+      try {
+        var saved = parseInt(localStorage.getItem(STORE) || '0', 10);
+        if (!isNaN(saved) && saved >= 0 && saved < slides.length) idx = saved;
+      } catch (_) {}
+
+      window.addEventListener('resize', fit);
+      fit();
+      paint();
+      focusDeck();
+    })();
+  </script>
+
+
+<script data-od-snapshot-bridge="">(function(){
+  var SNAPSHOT_STYLE_PROPS = [
+    'display','position','box-sizing','width','height','min-width','max-width','min-height','max-height',
+    'margin','margin-top','margin-right','margin-bottom','margin-left',
+    'padding','padding-top','padding-right','padding-bottom','padding-left',
+    'border','border-top','border-right','border-bottom','border-left','border-radius',
+    'font','font-family','font-size','font-weight','font-style','line-height','letter-spacing',
+    'color','background-color','opacity','transform','transform-origin','overflow','overflow-x','overflow-y',
+    'white-space','text-align','vertical-align','object-fit','object-position',
+    'flex','flex-direction','flex-wrap','flex-grow','flex-shrink','flex-basis',
+    'grid','grid-template-columns','grid-template-rows','grid-column','grid-row',
+    'gap','row-gap','column-gap','align-items','align-content','align-self',
+    'justify-items','justify-content','justify-self','inset','top','right','bottom','left',
+    'z-index','box-shadow','text-shadow'
+  ];
+  function copyComputedStyle(source, target){
+    if (!source || !target || source.nodeType !== 1 || target.nodeType !== 1) return;
+    var computed = window.getComputedStyle(source);
+    var style = target.getAttribute('style') || '';
+    for (var i = 0; i < SNAPSHOT_STYLE_PROPS.length; i++){
+      var prop = SNAPSHOT_STYLE_PROPS[i];
+      var value = computed.getPropertyValue(prop);
+      if (value) style += prop + ':' + value + ';';
+    }
+    target.setAttribute('style', style);
+  }
+  function syncElementState(source, target){
+    var tag = source.tagName ? source.tagName.toLowerCase() : '';
+    if (tag === 'img' && source.currentSrc) target.setAttribute('src', source.currentSrc);
+    if (tag === 'input' || tag === 'textarea') target.setAttribute('value', source.value || '');
+    if (tag === 'canvas') {
+      try {
+        var img = document.createElement('img');
+        img.setAttribute('src', source.toDataURL('image/png'));
+        img.setAttribute('style', target.getAttribute('style') || '');
+        target.parentNode && target.parentNode.replaceChild(img, target);
+      } catch (_) {}
+    }
+  }
+  function inlineSnapshotStyles(originalRoot, cloneRoot){
+    copyComputedStyle(originalRoot, cloneRoot);
+    syncElementState(originalRoot, cloneRoot);
+    var originals = originalRoot.querySelectorAll('*');
+    var clones = cloneRoot.querySelectorAll('*');
+    var count = Math.min(originals.length, clones.length, 3500);
+    for (var i = 0; i < count; i++){
+      copyComputedStyle(originals[i], clones[i]);
+      syncElementState(originals[i], clones[i]);
+    }
+    var scripts = cloneRoot.querySelectorAll('script');
+    for (var s = scripts.length - 1; s >= 0; s--) scripts[s].remove();
+    var links = cloneRoot.querySelectorAll('link[rel~="stylesheet"], link[rel~="preload"], link[rel~="preconnect"]');
+    for (var l = links.length - 1; l >= 0; l--) links[l].remove();
+    var styles = cloneRoot.querySelectorAll('style');
+    for (var st = 0; st < styles.length; st++) {
+      styles[st].textContent = (styles[st].textContent || '')
+        .replace(/@import[^;]+;/gi, '')
+        .replace(/@font-face\s*\{[^}]*\}/gi, '');
+    }
+  }
+  function waitForImages(){
+    var imgs = Array.prototype.slice.call(document.images || []);
+    return Promise.all(imgs.map(function(img){
+      if (img.complete) return Promise.resolve();
+      return new Promise(function(resolve){
+        img.addEventListener('load', resolve, { once: true });
+        img.addEventListener('error', resolve, { once: true });
+      });
+    }));
+  }
+  function scrollOffset(){
+    var doc = document.documentElement;
+    var body = document.body;
+    return {
+      x: Math.max(window.scrollX || 0, doc ? doc.scrollLeft || 0 : 0, body ? body.scrollLeft || 0 : 0),
+      y: Math.max(window.scrollY || 0, doc ? doc.scrollTop || 0 : 0, body ? body.scrollTop || 0 : 0)
+    };
+  }
+  function escapeAttribute(value){
+    return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+  function renderSnapshot(id){
+    var w = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    var h = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    var dpr = window.devicePixelRatio || 1;
+    var docW = Math.max(w, document.documentElement.scrollWidth || 0, document.body ? document.body.scrollWidth : 0);
+    var docH = Math.max(h, document.documentElement.scrollHeight || 0, document.body ? document.body.scrollHeight : 0);
+    var clone = document.documentElement.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+    inlineSnapshotStyles(document.documentElement, clone);
+    var scroll = scrollOffset();
+    var cloneBody = clone.querySelector('body');
+    var rootStyle = clone.getAttribute('style') || '';
+    var bodyStyle = cloneBody ? cloneBody.getAttribute('style') || '' : '';
+    var bodyContent = cloneBody ? cloneBody.innerHTML : clone.innerHTML;
+    var wrapperStyle = rootStyle + bodyStyle +
+      'margin:0;position:relative;left:' + (-scroll.x) + 'px;top:' + (-scroll.y) + 'px;' +
+      'width:' + docW + 'px;height:' + docH + 'px;overflow:visible;';
+    var html = '<div xmlns="http://www.w3.org/1999/xhtml" style="' + escapeAttribute(wrapperStyle) + '">' + bodyContent + '</div>';
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' +
+      '<foreignObject x="0" y="0" width="' + docW + '" height="' + docH + '">' +
+      html +
+      '</foreignObject></svg>';
+    var img = new Image();
+    img.onload = function(){
+      try {
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(w * dpr));
+        canvas.height = Math.max(1, Math.floor(h * dpr));
+        var ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('no 2d context');
+        ctx.scale(dpr, dpr);
+        ctx.drawImage(img, 0, 0, w, h);
+        window.parent.postMessage({ type: 'od:snapshot:result', id: id, dataUrl: canvas.toDataURL('image/png'), w: canvas.width, h: canvas.height }, '*');
+      } catch (err) {
+        window.parent.postMessage({ type: 'od:snapshot:result', id: id, error: String(err && err.message || err) }, '*');
+      }
+    };
+    function encodedSvgDataUrl(){
+      var encoded = encodeURIComponent(svg);
+      return 'data:image/svg+xml;charset=utf-8,' + encoded;
+    }
+    img.onerror = function(){
+      window.parent.postMessage({ type: 'od:snapshot:result', id: id, error: 'snapshot image failed' }, '*');
+    };
+    img.src = encodedSvgDataUrl();
+  }
+  window.addEventListener('message', function(ev){
+    var data = ev && ev.data;
+    if (!data || data.type !== 'od:snapshot' || !data.id) return;
+    waitForImages().then(function(){ renderSnapshot(String(data.id)); });
+  });
+})();</script><script data-od-srcdoc-transport-activation="">(function(){
+  window.addEventListener('message', function(ev){
+    var data = ev && ev.data;
+    if (!data || data.type !== 'od:srcdoc-transport-activate' || typeof data.html !== 'string') return;
+    document.open();
+    document.write(data.html);
+    document.close();
+  });
+})();</script></body></html>

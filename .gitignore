@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.local
+*.pyc
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+.superpowers/
+*.potx
+*.pptx
+!backend/app/templates/*.potx
+!backend/app/templates/*.pptx
+.DS_Store
+*.log
