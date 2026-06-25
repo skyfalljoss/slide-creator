@@ -67,7 +67,7 @@ pnpm dev
 If you run the backend manually, start it from `backend/`:
 
 ```bash
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload --reload-dir app
 ```
 
 ## How To Use SlideForge

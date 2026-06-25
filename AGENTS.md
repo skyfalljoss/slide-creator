@@ -46,7 +46,7 @@ Run from project root:
 
 | Command | Action |
 |---------|--------|
-| `uv run uvicorn app.main:app --reload` | Dev server (port 8000) |
+| `uv run uvicorn app.main:app --reload --reload-dir app` | Dev server (port 8000) |
 | `uv run pytest` | Run all tests |
 | `uv run pytest -v` | Verbose tests |
 | `uv run ruff check app/ tests/` | Lint check |
