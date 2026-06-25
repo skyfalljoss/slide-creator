@@ -170,9 +170,11 @@ Export links expire. Return to the export page and generate a new PPTX export.
 
 ```text
 slide-creator/
+  assets/     Shared static assets, including brand references
   backend/    FastAPI app, generation logic, uploads, exports, tests
-  frontend/   React app, pages, UI components, API client, tests
   docs/       Design and implementation notes
+  frontend/   React app, pages, UI components, API client, tests
+  samples/    Example CSV/XLSX upload files for local testing
   Makefile    Root commands for running the app
 ```
 
