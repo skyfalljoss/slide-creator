@@ -1,7 +1,7 @@
 import pytest
 
 from app.config import settings
-from app.services.providers import get_audit_service, get_dlp_service, get_generator_service, get_storage_service
+from app.services.generation.providers import get_audit_service, get_dlp_service, get_generator_service, get_storage_service
 
 
 def test_provider_factories_return_local_defaults():

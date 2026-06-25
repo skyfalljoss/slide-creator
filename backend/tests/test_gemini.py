@@ -1,5 +1,5 @@
 import pytest
-from app.services.gemini import GeminiService
+from app.services.generation.gemini import GeminiService
 from app.models.schemas import GenerateRequest, SlideData
 
 

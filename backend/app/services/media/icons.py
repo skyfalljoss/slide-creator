@@ -9,7 +9,7 @@ import io
 import logging
 from pathlib import Path
 
-FA_FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "fontawesome" / "fa-solid-900.ttf"
+FA_FONT_PATH = Path(__file__).resolve().parents[2] / "assets" / "fontawesome" / "fa-solid-900.ttf"
 logger = logging.getLogger(__name__)
 
 # Keyword groups -> Font Awesome 6 (solid) glyph. First match wins.

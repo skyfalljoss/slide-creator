@@ -1,5 +1,5 @@
 from app.models.schemas import ChartAudit, SlideData
-from app.services.charts import ChartPlanner
+from app.services.presentation.charts import ChartPlanner
 
 
 class SlideChartResolver:

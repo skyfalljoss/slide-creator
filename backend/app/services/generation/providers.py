@@ -1,9 +1,9 @@
 from app.config import settings
-from app.services.audit import AuditService
-from app.services.dlp import DlpService
-from app.services.gemini import GeminiService
-from app.services.gemini_api import GeminiApiService
-from app.services.storage import StorageService
+from app.services.platform.audit import AuditService
+from app.services.platform.dlp import DlpService
+from app.services.generation.gemini import GeminiService
+from app.services.generation.gemini_api import GeminiApiService
+from app.services.platform.storage import StorageService
 
 
 _audit_service = AuditService()

@@ -2,10 +2,10 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
 from app.models.schemas import RefineRequest, RefineResponse
-from app.services.auth import get_user_id
-from app.services import providers
-from app.services.session import get_session, update_slide
-from app.services.slide_images import SlideImageResolver
+from app.services.platform.auth import get_user_id
+from app.services.generation import providers
+from app.services.platform.session import get_session, update_slide
+from app.services.media.slide_images import SlideImageResolver
 
 router = APIRouter()
 image_resolver = SlideImageResolver()

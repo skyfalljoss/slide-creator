@@ -1,4 +1,4 @@
-from app.services.dlp import DlpService
+from app.services.platform.dlp import DlpService
 from app.models.schemas import SlideData
 
 

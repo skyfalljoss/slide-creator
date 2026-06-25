@@ -1,5 +1,5 @@
 from app.models.schemas import SlideData
-from app.services.deck_normalizer import normalize_deck
+from app.services.generation.deck_normalizer import normalize_deck
 
 
 def _slide(index: int, title: str, *, variant: str | None = None) -> SlideData:

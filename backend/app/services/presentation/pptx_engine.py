@@ -12,12 +12,12 @@ from pptx.util import Inches, Pt
 
 from app.config import settings
 from app.models.schemas import SlideData
-from app.services.pptx_blocks import PptxBlockMixin
-from app.services.pptx_canvas import PptxCanvas
-from app.services.pptx_charts import PptxChartMixin
-from app.services.pptx_layout import CANVAS_DIMS, LAYOUT
-from app.services.pptx_layouts import PptxLayoutMixin
-from app.services.pptx_theme import THEMES, Theme, resolve_theme
+from app.services.presentation.pptx_blocks import PptxBlockMixin
+from app.services.presentation.pptx_canvas import PptxCanvas
+from app.services.presentation.pptx_charts import PptxChartMixin
+from app.services.presentation.pptx_layout import CANVAS_DIMS, LAYOUT
+from app.services.presentation.pptx_layouts import PptxLayoutMixin
+from app.services.presentation.pptx_theme import THEMES, Theme, resolve_theme
 
 
 class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):

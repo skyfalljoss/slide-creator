@@ -12,7 +12,7 @@ from app.config import settings
 from app.main import app, purge_local_temp_files
 from app.routers import export as export_router, generate as generate_router, refine as refine_router, uploads
 from app.models.schemas import ChartRecommendation, SlideData
-from app.services import providers
+from app.services.generation import providers
 from app.routers.uploads import upload_file
 
 

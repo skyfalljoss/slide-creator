@@ -5,8 +5,8 @@ from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.routers import generate, refine, export, uploads
-from app.services.storage import StorageService
-from app.services.uploads import UploadService
+from app.services.platform.storage import StorageService
+from app.services.platform.uploads import UploadService
 
 
 @asynccontextmanager

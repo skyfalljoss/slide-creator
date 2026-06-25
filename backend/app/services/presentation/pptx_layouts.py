@@ -6,13 +6,13 @@ from pptx.enum.text import PP_ALIGN
 from pptx.slide import Slide
 
 from app.models.schemas import SlideData
-from app.services.pptx_layout import LAYOUT
-from app.services.pptx_text import (
+from app.services.presentation.pptx_layout import LAYOUT
+from app.services.presentation.pptx_text import (
     is_leaked_instruction as _is_leaked_instruction,
     looks_like_instruction as _looks_like_instruction,
     table_row_from_text as _table_row_from_text,
 )
-from app.services.pptx_theme import THEMES
+from app.services.presentation.pptx_theme import THEMES
 
 
 class PptxLayoutMixin:

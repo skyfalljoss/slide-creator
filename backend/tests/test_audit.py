@@ -1,8 +1,8 @@
 import pytest
 from starlette.requests import Request
 
-from app.services.audit import AuditService
-from app.services.auth import get_user_id
+from app.services.platform.audit import AuditService
+from app.services.platform.auth import get_user_id
 
 
 def make_request(user_id: str | None = None) -> Request:

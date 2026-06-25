@@ -6,12 +6,12 @@ from pptx import Presentation
 
 from app.config import settings
 from app.models.schemas import ExportRequest, ExportResponse
-from app.services.auth import get_user_id
-from app.services.deck_normalizer import normalize_deck
-from app.services.gemini_api import SLIDE_COUNTS, SLIDE_COUNT_TOLERANCE
-from app.services.pptx_engine import PptxEngine
-from app.services import providers
-from app.services.session import get_session
+from app.services.platform.auth import get_user_id
+from app.services.generation.deck_normalizer import normalize_deck
+from app.services.generation.gemini_api import SLIDE_COUNTS, SLIDE_COUNT_TOLERANCE
+from app.services.presentation.pptx_engine import PptxEngine
+from app.services.generation import providers
+from app.services.platform.session import get_session
 
 router = APIRouter()
 

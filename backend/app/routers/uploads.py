@@ -5,7 +5,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 from app.config import settings
 from app.models.schemas import UploadResponse
-from app.services.uploads import UploadService
+from app.services.platform.uploads import UploadService
 
 
 router = APIRouter()

@@ -2,7 +2,7 @@ import pytest
 
 from app.config import settings
 from app.models.schemas import GenerateRequest, RefineRequest, SlideData
-from app.services.gemini_api import GeminiApiService, GeminiConfigurationError, GeminiResponseError
+from app.services.generation.gemini_api import GeminiApiService, GeminiConfigurationError, GeminiResponseError
 
 
 def test_gemini_api_requires_api_key(monkeypatch: pytest.MonkeyPatch):

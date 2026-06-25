@@ -4,9 +4,9 @@ from pptx.slide import Slide
 from pptx.util import Pt
 
 from app.models.schemas import SlideData
-from app.services.pptx_layout import LAYOUT
-from app.services.pptx_text import clean_inline_text, split_label_body, table_row_from_text
-from app.services.pptx_theme import WHITE
+from app.services.presentation.pptx_layout import LAYOUT
+from app.services.presentation.pptx_text import clean_inline_text, split_label_body, table_row_from_text
+from app.services.presentation.pptx_theme import WHITE
 
 
 class PptxBlockMixin:

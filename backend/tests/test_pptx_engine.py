@@ -10,14 +10,14 @@ from pptx.util import Inches, Pt
 
 from app.config import settings
 from app.models.schemas import ChartAudit, SlideData
-from app.services.pptx_engine import PptxEngine
-from app.services.pptx_layout import LAYOUT
-from app.services.pptx_text import (
+from app.services.presentation.pptx_engine import PptxEngine
+from app.services.presentation.pptx_layout import LAYOUT
+from app.services.presentation.pptx_text import (
     add_markdown_paragraph,
     icon_shape,
     looks_like_instruction as _looks_like_instruction,
 )
-from app.services.pptx_theme import CITI_DARK, THEMES, WHITE, resolve_theme
+from app.services.presentation.pptx_theme import CITI_DARK, THEMES, WHITE, resolve_theme
 
 
 def test_render_sales_deck():
@@ -800,7 +800,7 @@ def test_card_icon_renders_fontawesome_image():
 
 
 def test_fontawesome_icon_renderer():
-    from app.services.icons import glyph_for, render_icon_png
+    from app.services.media.icons import glyph_for, render_icon_png
 
     assert glyph_for("speed") == "\uf0e7"  # bolt
     assert glyph_for("security") == "\uf3ed"  # shield-halved
@@ -810,12 +810,12 @@ def test_fontawesome_icon_renderer():
 
 
 def test_fontawesome_icon_renderer_logs_failure(monkeypatch, caplog):
-    from app.services import icons
+    from app.services.media import icons
 
     icons._png_cache.clear()
     monkeypatch.setattr(icons, "_load_font", lambda size_px: object())
 
-    with caplog.at_level(logging.WARNING, logger="app.services.icons"):
+    with caplog.at_level(logging.WARNING, logger="app.services.media.icons"):
         png = icons.render_icon_png("growth", "EE2A24")
 
     assert png is None

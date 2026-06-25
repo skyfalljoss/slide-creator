@@ -1,7 +1,7 @@
 import pytest
 
 from app.models.schemas import ChartRecommendation
-from app.services.charts import ChartPlanner
+from app.services.presentation.charts import ChartPlanner
 
 
 def test_chart_planner_builds_bar_chart_from_numeric_csv_summary():

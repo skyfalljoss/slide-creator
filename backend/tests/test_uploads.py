@@ -2,8 +2,8 @@ from io import BytesIO
 
 from openpyxl import Workbook
 
-from app.services import uploads
-from app.services.uploads import UploadService
+from app.services.platform import uploads
+from app.services.platform.uploads import UploadService
 
 
 def test_save_csv_returns_file_id_and_summary(tmp_path):

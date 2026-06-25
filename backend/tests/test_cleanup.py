@@ -1,8 +1,8 @@
 import os
 import time
 
-from app.services.storage import StorageService
-from app.services.uploads import UploadService
+from app.services.platform.storage import StorageService
+from app.services.platform.uploads import UploadService
 
 
 def test_storage_purge_expired_exports(tmp_path):
@@ -88,7 +88,7 @@ def test_uploads_purge_preserves_fresh_uploads(tmp_path):
 
 
 async def test_upload_pptx_uses_request_base_url_when_api_base_url_unset(tmp_path, monkeypatch):
-    from app.services import storage as storage_mod
+    from app.services.platform import storage as storage_mod
 
     monkeypatch.setattr(storage_mod.settings, "api_base_url", "")
     service = StorageService(export_dir=tmp_path)
@@ -99,7 +99,7 @@ async def test_upload_pptx_uses_request_base_url_when_api_base_url_unset(tmp_pat
 
 
 async def test_upload_pptx_prefers_configured_api_base_url(tmp_path, monkeypatch):
-    from app.services import storage as storage_mod
+    from app.services.platform import storage as storage_mod
 
     monkeypatch.setattr(storage_mod.settings, "api_base_url", "https://api.example.com")
     service = StorageService(export_dir=tmp_path)

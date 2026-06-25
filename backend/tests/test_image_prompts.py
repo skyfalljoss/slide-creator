@@ -1,5 +1,5 @@
 from app.models.schemas import SlideData
-from app.services.image_prompts import (
+from app.services.media.image_prompts import (
     PROMPT_SUFFIX,
     build_image_prompt,
     sanitize_prompt,
@@ -116,7 +116,7 @@ def test_blank_authored_image_prompt_falls_back_to_theme_map():
 
 
 def test_build_stock_query_strips_banned_and_stopwords():
-    from app.services.image_prompts import build_stock_query
+    from app.services.media.image_prompts import build_stock_query
 
     slide = _slide("Why Citi Chart of the Market")
     query = build_stock_query(slide)
@@ -126,14 +126,14 @@ def test_build_stock_query_strips_banned_and_stopwords():
 
 
 def test_build_stock_query_defaults_when_empty():
-    from app.services.image_prompts import build_stock_query
+    from app.services.media.image_prompts import build_stock_query
 
     slide = _slide("the of and")
     assert build_stock_query(slide) == "corporate business abstract"
 
 
 def test_build_stock_query_prefers_authored_image_query():
-    from app.services.image_prompts import build_stock_query
+    from app.services.media.image_prompts import build_stock_query
 
     slide = _slide("Why Solar Is Winning")
     slide.image_query = "solar panels rooftop sunset"
@@ -141,7 +141,7 @@ def test_build_stock_query_prefers_authored_image_query():
 
 
 def test_build_stock_query_sanitizes_authored_image_query():
-    from app.services.image_prompts import build_stock_query
+    from app.services.media.image_prompts import build_stock_query
 
     slide = _slide("Anything")
     slide.image_query = "the bar chart of solar panels"

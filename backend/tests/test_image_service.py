@@ -1,6 +1,6 @@
 import logging
 
-from app.services.image_service import CloudflareImageService
+from app.services.media.image_service import CloudflareImageService
 
 
 def test_extract_b64_openai_shape():
@@ -52,7 +52,7 @@ class _FakeAsyncClient:
 
 
 async def test_generate_image_returns_mock_when_worker_not_configured(monkeypatch):
-    from app.services import image_service as mod
+    from app.services.media import image_service as mod
 
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_url", "")
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_api_key", "")
@@ -62,7 +62,7 @@ async def test_generate_image_returns_mock_when_worker_not_configured(monkeypatc
 
 
 async def test_generate_image_returns_none_when_worker_not_configured_and_mock_disabled(monkeypatch):
-    from app.services import image_service as mod
+    from app.services.media import image_service as mod
 
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_url", "")
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_api_key", "")
@@ -73,7 +73,7 @@ async def test_generate_image_returns_none_when_worker_not_configured_and_mock_d
 
 async def test_generate_image_uses_cloudflare_even_when_ai_provider_local(monkeypatch):
     """Image generation must be independent of AI_PROVIDER (the content provider)."""
-    from app.services import image_service as mod
+    from app.services.media import image_service as mod
 
     monkeypatch.setattr(mod.settings, "ai_provider", "local")
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_url", "https://worker.example/")
@@ -85,7 +85,7 @@ async def test_generate_image_uses_cloudflare_even_when_ai_provider_local(monkey
 
 
 async def test_generate_image_logs_worker_non_200(monkeypatch, caplog):
-    from app.services import image_service as mod
+    from app.services.media import image_service as mod
 
     class _ErrorResponse:
         status_code = 503
@@ -99,7 +99,7 @@ async def test_generate_image_logs_worker_non_200(monkeypatch, caplog):
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_api_key", "test-key")
     monkeypatch.setattr(mod.httpx, "AsyncClient", _ErrorClient)
 
-    with caplog.at_level(logging.WARNING, logger="app.services.image_service"):
+    with caplog.at_level(logging.WARNING, logger="app.services.media.image_service"):
         result = await mod.CloudflareImageService().generate_image("prompt")
 
     assert result is None
@@ -137,7 +137,7 @@ class _FakeStockClient:
 
 
 async def test_stock_disabled_without_key(monkeypatch):
-    from app.services import image_service as mod
+    from app.services.media import image_service as mod
 
     monkeypatch.setattr(mod.settings, "stock_photos_api_key", "")
     svc = mod.StockPhotoService()
@@ -148,7 +148,7 @@ async def test_stock_disabled_without_key(monkeypatch):
 async def test_stock_returns_base64_when_configured(monkeypatch):
     import base64
 
-    from app.services import image_service as mod
+    from app.services.media import image_service as mod
 
     monkeypatch.setattr(mod.settings, "stock_photos_api_key", "test-key")
     monkeypatch.setattr(mod.httpx, "AsyncClient", _FakeStockClient)
@@ -159,7 +159,7 @@ async def test_stock_returns_base64_when_configured(monkeypatch):
 
 
 async def test_stock_logs_provider_non_200(monkeypatch, caplog):
-    from app.services import image_service as mod
+    from app.services.media import image_service as mod
 
     class _ErrorPexelsResponse(_FakePexelsResponse):
         status_code = 429
@@ -172,7 +172,7 @@ async def test_stock_logs_provider_non_200(monkeypatch, caplog):
     monkeypatch.setattr(mod.settings, "stock_photos_api_key", "test-key")
     monkeypatch.setattr(mod.httpx, "AsyncClient", _RateLimitedStockClient)
 
-    with caplog.at_level(logging.WARNING, logger="app.services.image_service"):
+    with caplog.at_level(logging.WARNING, logger="app.services.media.image_service"):
         result = await mod.StockPhotoService().search_image("banking")
 
     assert result is None
@@ -180,7 +180,7 @@ async def test_stock_logs_provider_non_200(monkeypatch, caplog):
 
 
 async def test_stock_returns_none_on_no_photos(monkeypatch):
-    from app.services import image_service as mod
+    from app.services.media import image_service as mod
 
     class _NoPhotos(_FakeStockClient):
         async def get(self, url, **kwargs):
@@ -193,7 +193,7 @@ async def test_stock_returns_none_on_no_photos(monkeypatch):
 
 async def test_resolve_slide_image_prefers_stock_then_falls_back_to_ai(monkeypatch):
     from app.models.schemas import SlideData
-    from app.services.slide_images import SlideImageResolver
+    from app.services.media.slide_images import SlideImageResolver
 
     slide = SlideData(index=2, title="Market", bullets=["x"], notes="", layout="content")
 

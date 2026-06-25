@@ -1,6 +1,6 @@
 import time
 
-from app.services.session import create_session, get_session, update_slide, purge_expired
+from app.services.platform.session import create_session, get_session, update_slide, purge_expired
 from app.models.schemas import SlideData
 
 
@@ -61,7 +61,7 @@ def test_get_session_enforces_ttl():
 
 
 def test_get_session_defaults_to_configured_ttl(monkeypatch):
-    monkeypatch.setattr("app.services.session.settings.session_ttl_minutes", 1)
+    monkeypatch.setattr("app.services.platform.session.settings.session_ttl_minutes", 1)
     slides = _make_slides()
     sid = create_session(slides, "sales_9")
     data = get_session(sid)

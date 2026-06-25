@@ -5,9 +5,9 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Inches, Pt
 
-from app.services.pptx_canvas import PptxCanvas
-from app.services.pptx_layout import CANVAS_DIMS, LAYOUT
-from app.services.pptx_theme import THEMES
+from app.services.presentation.pptx_canvas import PptxCanvas
+from app.services.presentation.pptx_layout import CANVAS_DIMS, LAYOUT
+from app.services.presentation.pptx_theme import THEMES
 
 _PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 
@@ -77,7 +77,7 @@ def test_canvas_bullets_box_uses_shape_to_fit_text():
 def test_canvas_add_slide_image_logs_failure(caplog):
     slide = _blank_slide()
 
-    with caplog.at_level(logging.WARNING, logger="app.services.pptx_canvas"):
+    with caplog.at_level(logging.WARNING, logger="app.services.presentation.pptx_canvas"):
         inserted = _canvas().add_slide_image(slide, "not-an-image", 1.0, 1.0, 2.0, 2.0)
 
     assert inserted is False

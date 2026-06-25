@@ -9,10 +9,10 @@ from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
-from app.services.icons import render_icon_png
-from app.services.pptx_layout import LAYOUT
-from app.services.pptx_text import add_markdown_paragraph, clean_inline_text, icon_shape
-from app.services.pptx_theme import WHITE, Theme
+from app.services.media.icons import render_icon_png
+from app.services.presentation.pptx_layout import LAYOUT
+from app.services.presentation.pptx_text import add_markdown_paragraph, clean_inline_text, icon_shape
+from app.services.presentation.pptx_theme import WHITE, Theme
 
 logger = logging.getLogger(__name__)
 

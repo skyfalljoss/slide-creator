@@ -5,14 +5,14 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 from app.config import settings
 from app.models.schemas import GenerateRequest, GenerateResponse, SlideData
-from app.services.auth import get_user_id
-from app.services.deck_normalizer import normalize_deck
-from app.services.gemini_api import MAX_SCRIPT_SLIDES, SLIDE_COUNTS, SLIDE_COUNT_TOLERANCE
-from app.services import providers
-from app.services.session import create_session
-from app.services.slide_charts import SlideChartResolver
-from app.services.slide_images import SlideImageResolver
-from app.services.uploads import UploadService
+from app.services.platform.auth import get_user_id
+from app.services.generation.deck_normalizer import normalize_deck
+from app.services.generation.gemini_api import MAX_SCRIPT_SLIDES, SLIDE_COUNTS, SLIDE_COUNT_TOLERANCE
+from app.services.generation import providers
+from app.services.platform.session import create_session
+from app.services.presentation.slide_charts import SlideChartResolver
+from app.services.media.slide_images import SlideImageResolver
+from app.services.platform.uploads import UploadService
 
 router = APIRouter()
 uploads = UploadService()

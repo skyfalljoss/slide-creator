@@ -1,8 +1,8 @@
 import asyncio
 
 from app.models.schemas import SlideData
-from app.services.image_prompts import build_image_prompt, build_stock_query
-from app.services.image_service import CloudflareImageService, StockPhotoService
+from app.services.media.image_prompts import build_image_prompt, build_stock_query
+from app.services.media.image_service import CloudflareImageService, StockPhotoService
 
 
 class SlideImageResolver:
