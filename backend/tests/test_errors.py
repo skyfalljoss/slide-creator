@@ -1,3 +1,4 @@
+from app.config import Settings
 from app.errors import (
     SlideForgeError,
     ConfigurationError,
@@ -120,3 +121,20 @@ def test_error_handler_returns_structured_json():
     resp = client.get("/fail-generic")
     assert resp.status_code == 500
     assert resp.json()["error"]["code"] == "INTERNAL_ERROR"
+
+
+def test_config_session_provider_defaults_to_local():
+    s = Settings()
+    assert s.session_provider == "local"
+
+
+def test_config_rate_limit_defaults():
+    s = Settings()
+    assert s.rate_limit_generate == "10/minute"
+    assert s.rate_limit_export == "30/minute"
+    assert s.rate_limit_uploads == "60/minute"
+
+
+def test_config_structlog_defaults():
+    s = Settings()
+    assert s.log_format == "console"

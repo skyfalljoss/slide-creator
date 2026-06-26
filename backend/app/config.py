@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # sourced from stock photos and fall back to AI generation on miss/error.
     stock_photos_provider: str = "pexels"
     stock_photos_api_key: str = ""
+    session_provider: str = "local"
+    upstash_redis_rest_url: str = ""
+    upstash_redis_rest_token: str = ""
+    rate_limit_generate: str = "10/minute"
+    rate_limit_export: str = "30/minute"
+    rate_limit_uploads: str = "60/minute"
+    log_format: str = "console"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

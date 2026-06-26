@@ -4,13 +4,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.config import settings
+from app.errors import ConfigurationError
+from app.middleware.error_handler import register_error_handlers
 from app.routers import generate, refine, export, uploads
 from app.services.platform.storage import StorageService
 from app.services.platform.uploads import UploadService
 
 
+def _validate_config() -> None:
+    if settings.ai_provider == "gemini" and not settings.gemini_api_key:
+        raise ConfigurationError("GEMINI_API_KEY is required when AI_PROVIDER=gemini")
+    if settings.session_provider == "redis" and (not settings.upstash_redis_rest_url or not settings.upstash_redis_rest_token):
+        raise ConfigurationError("UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required when SESSION_PROVIDER=redis")
+    if settings.storage_provider == "gcs" and not settings.gcs_bucket:
+        raise ConfigurationError("GCS_BUCKET is required when STORAGE_PROVIDER=gcs")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _validate_config()
     purge_local_temp_files()
     yield
 
@@ -21,6 +33,8 @@ app = FastAPI(
     docs_url="/docs",
     lifespan=lifespan,
 )
+
+register_error_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
