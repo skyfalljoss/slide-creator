@@ -111,7 +111,7 @@ async def test_generate_falls_back_to_local_generator_after_retry_failures(monke
     assert slides[0].title == "Client Name Proposal"
 
 
-def test_bullet_cap_truncates_to_five(monkeypatch: pytest.MonkeyPatch):
+def test_bullets_not_truncated(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "gemini_api_key", "test-key")
     service = GeminiApiService()
     slides_json = {
@@ -127,7 +127,7 @@ def test_bullet_cap_truncates_to_five(monkeypatch: pytest.MonkeyPatch):
         ]
     }
     slides = service.parse_slides_response(service.to_json(slides_json), deck_type="sales_9")
-    assert len(slides[1].bullets) == 5
+    assert len(slides[1].bullets) == 8
 
 
 def test_script_prompt_contains_processing_rules(monkeypatch: pytest.MonkeyPatch):
@@ -138,7 +138,8 @@ def test_script_prompt_contains_processing_rules(monkeypatch: pytest.MonkeyPatch
     )
     assert "Chunking" in prompt
     assert "original, detailed source text" in prompt
-    assert "at most 5" in prompt
+    assert "CALLOUT" in prompt
+    assert "NARRATIVE_CONTEXT" in prompt
     assert "Return JSON only" in prompt
     assert "Paragraph one." in prompt
 

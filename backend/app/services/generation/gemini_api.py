@@ -19,7 +19,6 @@ from app.prompts.script import SCRIPT_PROMPT_TEMPLATE
 
 SLIDE_COUNTS = {"sales_9": 9, "internal_6": 6}
 SLIDE_COUNT_TOLERANCE = 3
-MAX_BULLETS = 5
 MAX_SCRIPT_SLIDES = 20
 GENERATION_PARSE_ATTEMPTS = 2
 
@@ -75,7 +74,6 @@ class GeminiApiService:
             audience_tone=_rules.audience_tone(req.target_audience),
             prompt=req.prompt,
             upload_text=upload_text,
-            max_bullets=MAX_BULLETS,
             chart_rules=_rules.CHART_RULES,
             title_quality_rules=_rules.TITLE_QUALITY_RULES,
             kicker_quality_rules=_rules.KICKER_QUALITY_RULES,
@@ -84,6 +82,8 @@ class GeminiApiService:
             image_rules=_rules.IMAGE_RULES,
             variant_rules=_rules.VARIANT_RULES,
             component_rules=_rules.COMPONENT_RULES,
+            callout_quality_rules=_rules.CALLOUT_QUALITY_RULES,
+            narrative_context_rules=_rules.NARRATIVE_CONTEXT_RULES,
             layouts_line=_rules.LAYOUTS_LINE,
             schema_block=_rules.SCHEMA_BLOCK,
         )
@@ -96,7 +96,6 @@ class GeminiApiService:
             audience_tone=_rules.audience_tone(req.target_audience),
             prompt_quoted=f'"""\n{req.prompt}\n"""',
             upload_text=upload_text,
-            max_bullets=MAX_BULLETS,
             title_quality_rules=_rules.TITLE_QUALITY_RULES,
             kicker_quality_rules=_rules.KICKER_QUALITY_RULES,
             bullet_quality_rules=_rules.BULLET_QUALITY_RULES,
@@ -105,6 +104,8 @@ class GeminiApiService:
             image_rules=_rules.IMAGE_RULES,
             variant_rules=_rules.VARIANT_RULES,
             component_rules=_rules.COMPONENT_RULES,
+            callout_quality_rules=_rules.CALLOUT_QUALITY_RULES,
+            narrative_context_rules=_rules.NARRATIVE_CONTEXT_RULES,
             layouts_line=_rules.LAYOUTS_LINE,
             schema_block=_rules.SCHEMA_BLOCK,
         )
@@ -120,6 +121,8 @@ class GeminiApiService:
             image_rules=_rules.IMAGE_RULES,
             variant_rules=_rules.VARIANT_RULES,
             component_rules=_rules.COMPONENT_RULES,
+            callout_quality_rules=_rules.CALLOUT_QUALITY_RULES,
+            narrative_context_rules=_rules.NARRATIVE_CONTEXT_RULES,
             layouts_line=_rules.LAYOUTS_LINE,
             schema_block=_rules.SCHEMA_BLOCK,
         )
@@ -137,11 +140,6 @@ class GeminiApiService:
             slides = [SlideData.model_validate(item) for item in payload["slides"]]
         except ValidationError as exc:
             raise GeminiResponseError("Gemini slide JSON did not match the schema") from exc
-
-        # Cap bullets on every slide to prevent "death by PowerPoint".
-        for slide in slides:
-            if len(slide.bullets) > MAX_BULLETS:
-                slide.bullets = slide.bullets[:MAX_BULLETS]
 
         if not enforce_count:
             # Script mode: the content decides how many slides; just bound and reindex.
