@@ -175,7 +175,8 @@ class RefineResponse(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    session_id: str
+    session_id: str | None = None
+    deck_id: str | None = None
 
 
 class ExportResponse(BaseModel):
