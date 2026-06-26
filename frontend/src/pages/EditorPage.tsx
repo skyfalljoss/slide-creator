@@ -16,11 +16,11 @@ export function EditorPage() {
   const fabricRef = useRef<fabric.Canvas | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [deckName, setDeckName] = useState('')
+  const [deckNameInitialized, setDeckNameInitialized] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isDirty, setIsDirty] = useState(false)
   const [zoom, setZoom] = useState(1)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const slidesRef = useRef<SlideData[]>([])
 
   const { data: deck, isLoading } = useQuery({
     queryKey: ['deck', deckId],
@@ -28,12 +28,10 @@ export function EditorPage() {
     enabled: !!deckId,
   })
 
-  useEffect(() => {
-    if (deck) {
-      setDeckName(deck.name)
-      slidesRef.current = deck.slides
-    }
-  }, [deck])
+  if (deck && !deckNameInitialized) {
+    setDeckName(deck.name)
+    setDeckNameInitialized(true)
+  }
 
   const saveMutation = useMutation({
     mutationFn: (data: { slides: SlideData[]; name?: string }) =>
@@ -49,7 +47,6 @@ export function EditorPage() {
   })
 
   const persistSlides = useCallback((slides: SlideData[]) => {
-    slidesRef.current = slides
     setIsDirty(true)
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(() => {
@@ -107,17 +104,18 @@ export function EditorPage() {
     fabricRef.current = canvas
 
     canvas.on('object:modified', () => {
-      const currentSlide = slidesRef.current[selectedIndex]
+      const slides = deck.slides
+      const currentSlide = slides[selectedIndex]
       if (!currentSlide) return
       const objects = canvas.getObjects().map((o) => o.toJSON())
       const updated = canvasObjectsToSlide(objects, currentSlide)
-      const newSlides = [...slidesRef.current]
+      const newSlides = [...slides]
       newSlides[selectedIndex] = updated
       persistSlides(newSlides)
     })
 
-    if (slidesRef.current[selectedIndex]) {
-      renderSlide(canvas, slidesRef.current[selectedIndex])
+    if (deck.slides[selectedIndex]) {
+      renderSlide(canvas, deck.slides[selectedIndex])
     }
 
     const resizeCanvas = () => {
@@ -157,14 +155,14 @@ export function EditorPage() {
     )
   }
 
-  const currentSlides = slidesRef.current
-  const currentSlide = currentSlides[selectedIndex] || currentSlides[0]
+  const slides = deck.slides
+  const currentSlide = slides[selectedIndex] || slides[0]
 
   const handleSelectSlide = (index: number) => {
     if (fabricRef.current) {
       const objects = fabricRef.current.getObjects().map((o) => o.toJSON())
-      const updated = canvasObjectsToSlide(objects, currentSlides[selectedIndex])
-      const newSlides = [...currentSlides]
+      const updated = canvasObjectsToSlide(objects, slides[selectedIndex])
+      const newSlides = [...slides]
       newSlides[selectedIndex] = updated
       persistSlides(newSlides)
     }
@@ -172,18 +170,16 @@ export function EditorPage() {
   }
 
   const handleAddSlide = () => {
-    const newSlide = createEmptySlide(currentSlides.length + 1)
-    const newSlides = [...currentSlides, newSlide]
-    slidesRef.current = newSlides
+    const newSlide = createEmptySlide(slides.length + 1)
+    const newSlides = [...slides, newSlide]
     queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
     saveMutation.mutate({ slides: newSlides })
     setSelectedIndex(newSlides.length - 1)
   }
 
   const handleDeleteSlide = (index: number) => {
-    if (currentSlides.length <= 1) return
-    const newSlides = currentSlides.filter((_, i) => i !== index).map((s, i) => ({ ...s, index: i + 1 }))
-    slidesRef.current = newSlides
+    if (slides.length <= 1) return
+    const newSlides = slides.filter((_, i) => i !== index).map((s, i) => ({ ...s, index: i + 1 }))
     queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
     saveMutation.mutate({ slides: newSlides })
     setSelectedIndex(Math.min(index, newSlides.length - 1))
@@ -191,13 +187,17 @@ export function EditorPage() {
 
   const handleSaveName = () => {
     if (deckName !== deck.name) {
-      saveMutation.mutate({ slides: currentSlides, name: deckName })
+      saveMutation.mutate({ slides, name: deckName })
     }
+  }
+
+  const setSlidesAndSchedule = (newSlides: SlideData[]) => {
+    queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
+    persistSlides(newSlides)
   }
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] -mx-4 sm:-mx-6 lg:-mx-8 -mb-6">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-citi-dark border-b border-white/10 shrink-0">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate('/my-decks')} className="text-slate-400 hover:text-white text-sm">← Back</button>
@@ -209,7 +209,7 @@ export function EditorPage() {
             onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
             className="bg-transparent text-white font-semibold text-sm border-none outline-none focus:ring-1 focus:ring-citi-blue rounded px-2 py-0.5"
           />
-          <span className="text-xs text-slate-500">Slide {selectedIndex + 1} of {currentSlides.length}</span>
+          <span className="text-xs text-slate-500">Slide {selectedIndex + 1} of {slides.length}</span>
           {isDirty && <span className="text-xs text-yellow-400">Unsaved changes</span>}
         </div>
         <div className="flex gap-2">
@@ -221,13 +221,12 @@ export function EditorPage() {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        {/* Left: Slide thumbs */}
         <div className="w-44 bg-citi-dark/50 border-r border-white/10 overflow-y-auto shrink-0">
           <div className="p-2">
             <div className="text-[10px] uppercase text-slate-500 font-semibold px-1 mb-2">Slides</div>
-            {currentSlides.map((slide: SlideData, i: number) => (
+            {slides.map((slide, i) => (
               <button
-                key={i}
+                key={slide.index}
                 onClick={() => handleSelectSlide(i)}
                 className={cn(
                   'w-full text-left p-2 rounded mb-1 text-xs transition',
@@ -249,7 +248,6 @@ export function EditorPage() {
           </div>
         </div>
 
-        {/* Center: Canvas */}
         <div className="flex-1 bg-slate-700 flex items-center justify-center relative overflow-hidden">
           <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-slate-800 rounded-lg px-2 py-1 z-10">
             <button onClick={() => {
@@ -275,7 +273,6 @@ export function EditorPage() {
           </div>
         </div>
 
-        {/* Right: Properties */}
         <div className="w-60 bg-citi-dark/50 border-l border-white/10 overflow-y-auto shrink-0 p-3">
           <div className="text-[10px] uppercase text-slate-500 font-semibold mb-3">Properties</div>
 
@@ -287,44 +284,39 @@ export function EditorPage() {
                   type="text"
                   value={currentSlide.title}
                   onChange={(e) => {
-                    const newSlides = currentSlides.map((s: SlideData, i: number) =>
+                    const newSlides = slides.map((s, i) =>
                       i === selectedIndex ? { ...s, title: e.target.value } : s,
                     )
-                    persistSlides(newSlides)
-                    queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
+                    setSlidesAndSchedule(newSlides)
                   }}
                   className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
                 />
               </div>
 
-              {currentSlide.kicker !== undefined && (
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1">Kicker</label>
-                  <input
-                    type="text"
-                    value={currentSlide.kicker || ''}
-                    onChange={(e) => {
-                      const newSlides = currentSlides.map((s: SlideData, i: number) =>
-                        i === selectedIndex ? { ...s, kicker: e.target.value || null } : s,
-                      )
-                      persistSlides(newSlides)
-                      queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
-                    }}
-                    className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
-                  />
-                </div>
-              )}
+              <div>
+                <label className="text-[10px] text-slate-500 block mb-1">Kicker</label>
+                <input
+                  type="text"
+                  value={currentSlide.kicker || ''}
+                  onChange={(e) => {
+                    const newSlides = slides.map((s, i) =>
+                      i === selectedIndex ? { ...s, kicker: e.target.value || null } : s,
+                    )
+                    setSlidesAndSchedule(newSlides)
+                  }}
+                  className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                />
+              </div>
 
               <div>
                 <label className="text-[10px] text-slate-500 block mb-1">Layout</label>
                 <select
                   value={currentSlide.layout}
                   onChange={(e) => {
-                    const newSlides = currentSlides.map((s: SlideData, i: number) =>
+                    const newSlides = slides.map((s, i) =>
                       i === selectedIndex ? { ...s, layout: e.target.value } : s,
                     )
-                    persistSlides(newSlides)
-                    queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
+                    setSlidesAndSchedule(newSlides)
                   }}
                   className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
                 >
@@ -338,7 +330,7 @@ export function EditorPage() {
               <div>
                 <label className="text-[10px] text-slate-500 block mb-1">Bullet Points</label>
                 <div className="space-y-1">
-                  {currentSlide.bullets.map((b: string, bi: number) => (
+                  {currentSlide.bullets.map((b, bi) => (
                     <input
                       key={bi}
                       type="text"
@@ -346,22 +338,20 @@ export function EditorPage() {
                       onChange={(e) => {
                         const newBullets = [...currentSlide.bullets]
                         newBullets[bi] = e.target.value
-                        const newSlides = currentSlides.map((s: SlideData, i: number) =>
+                        const newSlides = slides.map((s, i) =>
                           i === selectedIndex ? { ...s, bullets: newBullets } : s,
                         )
-                        persistSlides(newSlides)
-                        queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
+                        setSlidesAndSchedule(newSlides)
                       }}
                       className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
                     />
                   ))}
                   <button
                     onClick={() => {
-                      const newSlides = currentSlides.map((s: SlideData, i: number) =>
+                      const newSlides = slides.map((s, i) =>
                         i === selectedIndex ? { ...s, bullets: [...s.bullets, ''] } : s,
                       )
-                      persistSlides(newSlides)
-                      queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
+                      setSlidesAndSchedule(newSlides)
                     }}
                     className="text-[10px] text-citi-blue hover:underline"
                   >
@@ -375,18 +365,17 @@ export function EditorPage() {
                 <textarea
                   value={currentSlide.notes || ''}
                   onChange={(e) => {
-                    const newSlides = currentSlides.map((s: SlideData, i: number) =>
+                    const newSlides = slides.map((s, i) =>
                       i === selectedIndex ? { ...s, notes: e.target.value || '' } : s,
                     )
-                    persistSlides(newSlides)
-                    queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
+                    setSlidesAndSchedule(newSlides)
                   }}
                   rows={5}
                   className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white resize-none"
                 />
               </div>
 
-              {currentSlides.length > 1 && (
+              {slides.length > 1 && (
                 <button
                   onClick={() => handleDeleteSlide(selectedIndex)}
                   className="text-xs text-red-400 hover:text-red-300 mt-2"

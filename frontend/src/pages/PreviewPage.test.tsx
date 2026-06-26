@@ -4,10 +4,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DeckProvider } from '@/state/DeckContext'
 import { PreviewPage } from './PreviewPage'
-import { refine } from '@/lib/api'
-import type { DeckState } from '@/types'
+import { refine, saveDeck } from '@/lib/api'
 
-vi.mock('@/lib/api', () => ({ refine: vi.fn() }))
+vi.mock('@/lib/api', () => ({ refine: vi.fn(), saveDeck: vi.fn() }))
 
 const storedDeck = {
   sessionId: 'session-1',
@@ -67,6 +66,7 @@ function renderPreview(initialPath = '/preview') {
 describe('PreviewPage', () => {
   beforeEach(() => {
     vi.mocked(refine).mockReset()
+    vi.mocked(saveDeck).mockReset()
     sessionStorage.clear()
   })
 

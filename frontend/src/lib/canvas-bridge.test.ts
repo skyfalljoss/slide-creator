@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect } from 'vitest'
 import { createEmptySlide, slideToCanvasObjects, canvasObjectsToSlide } from './canvas-bridge'
 import type { SlideData } from '@/types'
