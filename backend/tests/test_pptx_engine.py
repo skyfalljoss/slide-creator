@@ -284,7 +284,7 @@ class SlideWithoutNotesFrame:
 
 
 def test_add_speaker_notes_skips_missing_notes_text_frame():
-    PptxEngine()._add_speaker_notes(SlideWithoutNotesFrame(), "Speaker note")
+    PptxEngine()._add_speaker_notes(SlideWithoutNotesFrame(), SlideData(index=1, title="", bullets=[], notes="Speaker note", layout="content"))
 
 
 def test_render_standard_content_with_image_adds_large_visual():

@@ -78,7 +78,7 @@ class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
             else:
                 self._apply_content_slide(slide, slide_data)
 
-            self._add_speaker_notes(slide, slide_data.notes)
+            self._add_speaker_notes(slide, slide_data)
             self._add_brand_header(slide, prs.slide_width)
 
         buf = io.BytesIO()
@@ -218,13 +218,15 @@ class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
         handler = self._framework_variant_handlers().get(variant, self._apply_standard_content)
         handler(slide, data)
 
-    def _add_speaker_notes(self, slide: Slide, notes: str) -> None:
-        if not notes:
+    def _add_speaker_notes(self, slide: Slide, data: SlideData) -> None:
+        if not data.notes:
             return
         notes_frame = slide.notes_slide.notes_text_frame
         if notes_frame is None:
             return
-        notes_frame.text = notes
+        notes_frame.text = data.notes
+        if getattr(data, "narrative_context", None):
+            notes_frame.text += "\n\n---\n\n" + data.narrative_context
 
     def _add_bullets_box(self, slide: Slide, bullets: list[str], left: float, top: float, width: float, height: float) -> None:
         return self.canvas.add_bullets_box(slide, bullets, left, top, width, height)
