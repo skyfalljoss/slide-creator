@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from app.config import settings
 from app.errors import ConfigurationError
 from app.middleware.error_handler import register_error_handlers
+from app.middleware.rate_limit import register_rate_limiter
 from app.routers import generate, refine, export, uploads
 from app.services.platform.storage import StorageService
 from app.services.platform.uploads import UploadService
@@ -61,6 +62,7 @@ app = FastAPI(
 )
 
 register_error_handlers(app)
+register_rate_limiter(app)
 
 app.add_middleware(
     CORSMiddleware,

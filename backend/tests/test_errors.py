@@ -1,3 +1,4 @@
+import pytest
 from app.config import Settings
 from app.errors import (
     SlideForgeError,
@@ -128,7 +129,10 @@ def test_config_session_provider_defaults_to_local():
     assert s.session_provider == "local"
 
 
-def test_config_rate_limit_defaults():
+def test_config_rate_limit_defaults(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("RATE_LIMIT_GENERATE", raising=False)
+    monkeypatch.delenv("RATE_LIMIT_EXPORT", raising=False)
+    monkeypatch.delenv("RATE_LIMIT_UPLOADS", raising=False)
     s = Settings()
     assert s.rate_limit_generate == "10/minute"
     assert s.rate_limit_export == "30/minute"

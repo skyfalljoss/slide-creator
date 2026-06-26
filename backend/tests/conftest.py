@@ -11,3 +11,7 @@ os.environ["CLOUDFLARE_IMAGE_WORKER_URL"] = ""
 os.environ["CLOUDFLARE_IMAGE_WORKER_API_KEY"] = ""
 # No stock-photo key in tests -> stock source disabled, AI fallback used (mock).
 os.environ["STOCK_PHOTOS_API_KEY"] = ""
+# High rate limits so tests don't hit 429 under CI parallelism
+os.environ["RATE_LIMIT_GENERATE"] = "10000/minute"
+os.environ["RATE_LIMIT_EXPORT"] = "10000/minute"
+os.environ["RATE_LIMIT_UPLOADS"] = "10000/minute"

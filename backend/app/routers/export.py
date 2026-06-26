@@ -1,17 +1,21 @@
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 from zipfile import BadZipFile, ZipFile
-from fastapi import APIRouter, HTTPException, Request
+
+from fastapi import APIRouter, Depends, Request
 from pptx import Presentation
 
 from app.config import settings
+from app.dependencies import get_audit_service, get_session_store, get_storage_service
+from app.errors import GenerationError, SessionNotFoundError
+from app.middleware.rate_limit import limiter
 from app.models.schemas import ExportRequest, ExportResponse
 from app.services.platform.auth import get_user_id
 from app.services.generation.deck_normalizer import normalize_deck
 from app.services.generation.gemini_api import SLIDE_COUNTS, SLIDE_COUNT_TOLERANCE
 from app.services.presentation.pptx_engine import PptxEngine
-from app.services.generation import providers
-from app.services.platform.session import get_session
+from app.services.platform.session import SessionStore
+from app.services.platform.storage import StorageService
 
 router = APIRouter()
 
@@ -32,10 +36,16 @@ def _validate_pptx_bytes(content: bytes) -> None:
 
 
 @router.post("/export")
-async def export_deck(req: ExportRequest, request: Request) -> ExportResponse:
-    session = get_session(req.session_id)
+@limiter.limit(settings.rate_limit_export)
+async def export_deck(
+    req: ExportRequest,
+    request: Request,
+    session_store: SessionStore = Depends(get_session_store),
+    storage: StorageService = Depends(get_storage_service),
+) -> ExportResponse:
+    session = session_store.get(req.session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found or expired")
+        raise SessionNotFoundError(req.session_id)
 
     engine = PptxEngine(
         template_path=settings.sample_template_path,
@@ -49,11 +59,11 @@ async def export_deck(req: ExportRequest, request: Request) -> ExportResponse:
     try:
         _validate_pptx_bytes(pptx_bytes)
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    storage = providers.get_storage_service()
+        raise GenerationError(str(exc)) from exc
+
     url = await storage.upload_pptx(req.session_id, pptx_bytes, base_url=str(request.base_url))
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.signed_url_expiry_minutes)
-    audit = providers.get_audit_service()
+    audit = get_audit_service()
     audit.record(
         action="export",
         session_id=req.session_id,

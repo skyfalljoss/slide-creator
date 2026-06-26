@@ -1,10 +1,14 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 
 from app.config import settings
+from app.dependencies import get_audit_service, get_dlp_service, get_generator_service, get_session_store
+from app.errors import DlpViolationError, SessionNotFoundError
+from app.middleware.rate_limit import limiter
 from app.models.schemas import RefineRequest, RefineResponse
 from app.services.platform.auth import get_user_id
-from app.services.generation import providers
-from app.services.platform.session import get_session, update_slide
+from app.services.platform.session import SessionStore
+from app.services.platform.dlp import DlpService
+from app.services.generation.gemini import GeminiService
 from app.services.media.slide_images import SlideImageResolver
 
 router = APIRouter()
@@ -12,18 +16,21 @@ image_resolver = SlideImageResolver()
 
 
 @router.post("/refine")
-async def refine(req: RefineRequest, request: Request) -> RefineResponse:
-    dlp = providers.get_dlp_service()
+@limiter.limit(settings.rate_limit_generate)
+async def refine(
+    req: RefineRequest,
+    request: Request,
+    dlp: DlpService = Depends(get_dlp_service),
+    gemini: GeminiService = Depends(get_generator_service),
+    session_store: SessionStore = Depends(get_session_store),
+) -> RefineResponse:
     violations = dlp.scan_prompt(req.instruction)
     if violations:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Instruction contains prohibited terms: {', '.join(violations)}",
-        )
+        raise DlpViolationError(terms=violations)
 
-    session = get_session(req.session_id)
+    session = session_store.get(req.session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found or expired")
+        raise SessionNotFoundError(req.session_id)
 
     current_slide = None
     for s in session["slides"]:
@@ -32,9 +39,8 @@ async def refine(req: RefineRequest, request: Request) -> RefineResponse:
             break
 
     if current_slide is None:
-        raise HTTPException(status_code=404, detail="Slide not found")
+        raise SessionNotFoundError(req.session_id)
 
-    gemini = providers.get_generator_service()
     updated = await gemini.refine(req, current_slide)
     if updated.kicker is None:
         updated.kicker = current_slide.kicker
@@ -62,12 +68,10 @@ async def refine(req: RefineRequest, request: Request) -> RefineResponse:
 
     slide_violations = dlp.scan_slide(updated)
     if slide_violations:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Refined content contains prohibited terms: {', '.join(slide_violations)}",
-        )
-    update_slide(req.session_id, updated)
-    audit = providers.get_audit_service()
+        raise DlpViolationError(terms=slide_violations)
+
+    session_store.update_slide(req.session_id, updated)
+    audit = get_audit_service()
     audit.record(
         action="refine",
         session_id=req.session_id,
