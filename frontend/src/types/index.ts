@@ -104,7 +104,8 @@ export interface RefineResponse {
 }
 
 export interface ExportRequest {
-  session_id: string
+  session_id?: string | null
+  deck_id?: string | null
 }
 
 export interface ExportResponse {
@@ -118,4 +119,54 @@ export interface DeckState {
   slides: SlideData[]
   uploadedFile: UploadResponse | null
   lastExport: ExportResponse | null
+}
+
+export interface DeckSummary {
+  id: string
+  name: string
+  deck_type: DeckType
+  slide_count: number
+  thumbnail_b64: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DeckDetail {
+  id: string
+  name: string
+  deck_type: DeckType
+  theme: string
+  aspect_ratio: string
+  slides: SlideData[]
+  thumbnail_b64: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SaveDeckRequest {
+  name: string
+  deck_type: DeckType
+  theme: string
+  aspect_ratio: string
+  slides: SlideData[]
+  thumbnail_b64?: string | null
+}
+
+export interface SaveDeckResponse {
+  id: string
+  name: string
+  created_at: string
+}
+
+export interface UpdateDeckRequest {
+  name?: string
+  slides?: SlideData[]
+}
+
+export interface UpdateDeckResponse {
+  updated_at: string
+}
+
+export interface ListDecksResponse {
+  decks: DeckSummary[]
 }
