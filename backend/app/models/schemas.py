@@ -72,6 +72,38 @@ class ChartAudit(BaseModel):
     rejection_reason: str | None = None
 
 
+class SlideContent(BaseModel):
+    index: int
+    title: str
+    kicker: str | None = None
+    subtitle: str | None = None
+    bullets: list[str]
+    notes: str
+    layout: str
+    variant: SlideVariant | None = None
+    blocks: list[dict] | None = None
+
+    @field_validator("blocks", mode="before")
+    @classmethod
+    def coerce_single_block(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return [value]
+        return value
+
+
+class SlideEnrichment(BaseModel):
+    chart_data: ChartData | None = None
+    visual_direction: str | None = None
+    chart_recommendation: ChartRecommendation | None = None
+    chart_audit: ChartAudit | None = None
+
+
+class SlideAssets(BaseModel):
+    image_b64: str | None = None
+    image_prompt: str | None = None
+    image_query: str | None = None
+
+
 class SlideData(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
@@ -91,6 +123,9 @@ class SlideData(BaseModel):
     image_b64: str | None = None
     image_prompt: str | None = None
     image_query: str | None = None
+    content: SlideContent | None = None
+    enrichment: SlideEnrichment | None = None
+    assets: SlideAssets | None = None
 
     @field_validator("blocks", mode="before")
     @classmethod
@@ -98,6 +133,20 @@ class SlideData(BaseModel):
         if isinstance(value, dict):
             return [value]
         return value
+
+    @classmethod
+    def from_legacy(cls, **data: object) -> "SlideData":
+        content_fields = {k: data.pop(k) for k in list(data) if k in SlideContent.model_fields}
+        enrichment_fields = {k: data.pop(k) for k in list(data) if k in SlideEnrichment.model_fields}
+        assets_fields = {k: data.pop(k) for k in list(data) if k in SlideAssets.model_fields}
+        slide = cls(**data)
+        if any(v is not None for v in content_fields.values()):
+            slide.content = SlideContent(**content_fields)
+        if any(v is not None for v in enrichment_fields.values()):
+            slide.enrichment = SlideEnrichment(**enrichment_fields)
+        if any(v is not None for v in assets_fields.values()):
+            slide.assets = SlideAssets(**assets_fields)
+        return slide
 
 
 class GenerateResponse(BaseModel):
