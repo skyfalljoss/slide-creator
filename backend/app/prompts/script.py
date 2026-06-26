@@ -23,8 +23,10 @@ Content quality rules:
 {title_quality_rules}
 {kicker_quality_rules}
 {bullet_quality_rules}
-Use at most {max_bullets} bullets per slide.
+Use 3-12 bullets per slide — let the topic's depth determine the count.
 {notes_quality_rules}
+{callout_quality_rules}
+{narrative_context_rules}
 
 {chart_rules}
 
