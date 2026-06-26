@@ -12,6 +12,7 @@ from app.config import settings
 from app.main import app, purge_local_temp_files
 from app.routers import export as export_router, generate as generate_router, refine as refine_router, uploads
 from app.models.schemas import ChartRecommendation, SlideData
+from app import dependencies
 from app.services.generation import providers
 from app.routers.uploads import upload_file
 
@@ -21,6 +22,7 @@ async def client():
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+        app.dependency_overrides.clear()
 
 
 def delete_upload(file_id: str):
@@ -30,6 +32,16 @@ def delete_upload(file_id: str):
     metadata_path = Path(settings.local_upload_dir) / f"{file_id}.json"
     if metadata_path.exists():
         metadata_path.unlink()
+
+
+def _patch_generator(monkeypatch: pytest.MonkeyPatch, fake):
+    dependencies.get_generator_service.cache_clear()
+    app.dependency_overrides[dependencies.get_generator_service] = lambda: fake
+
+
+def _patch_storage(monkeypatch: pytest.MonkeyPatch, fake):
+    dependencies.get_storage_service.cache_clear()
+    app.dependency_overrides[dependencies.get_storage_service] = lambda: fake
 
 
 @pytest.mark.asyncio
@@ -104,7 +116,7 @@ async def test_generate_uses_provider_seam_at_request_time(
             ]
 
     fake = FakeGenerator()
-    monkeypatch.setattr(providers, "get_generator_service", lambda: fake)
+    _patch_generator(monkeypatch, fake)
 
     resp = await client.post(
         "/api/v1/generate",
@@ -136,7 +148,7 @@ async def test_generate_keeps_normalized_deck_within_slide_count_window(
                 for i in range(1, 13)
             ]
 
-    monkeypatch.setattr(providers, "get_generator_service", lambda: MaxWindowGenerator())
+    _patch_generator(monkeypatch, MaxWindowGenerator())
 
     resp = await client.post(
         "/api/v1/generate",
@@ -192,7 +204,7 @@ async def test_generate_resolves_images_for_framework_visual_variants(
             resolved.append(slide.index)
             return "IMG64"
 
-    monkeypatch.setattr(providers, "get_generator_service", lambda: FakeGenerator())
+    _patch_generator(monkeypatch, FakeGenerator())
     monkeypatch.setattr(generate_router, "image_resolver", Resolver())
 
     resp = await client.post(
@@ -257,7 +269,7 @@ async def test_generate_accepts_ai_chart_recommendation_from_uploaded_columns(
                 ),
             ]
 
-    monkeypatch.setattr(providers, "get_generator_service", lambda: RecommendedChartService())
+    _patch_generator(monkeypatch, RecommendedChartService())
     upload = await client.post(
         "/api/v1/uploads",
         files={"file": ("revenue.csv", b"Quarter,Revenue\nQ1,100\nQ2,125\n", "text/csv")},
@@ -306,7 +318,7 @@ async def test_generate_rejects_ai_chart_recommendation_for_missing_uploaded_col
                 ),
             ]
 
-    monkeypatch.setattr(providers, "get_generator_service", lambda: InvalidChartService())
+    _patch_generator(monkeypatch, InvalidChartService())
     upload = await client.post(
         "/api/v1/uploads",
         files={"file": ("revenue.csv", b"Quarter,Revenue\nQ1,100\n", "text/csv")},
@@ -343,7 +355,7 @@ async def test_generate_with_prohibited_uploaded_csv_chart_data_returns_400(clie
         )
 
         assert resp.status_code == 400
-        assert "risk-free" in resp.json()["detail"]
+        assert "risk-free" in resp.json()["error"]["message"]
     finally:
         delete_upload(file_id)
 
@@ -438,6 +450,7 @@ async def test_upload_unexpected_service_error_is_not_400(
     )
 
     assert resp.status_code == 500
+    assert resp.json()["error"]["code"] == "INTERNAL_ERROR"
 
 
 @pytest.mark.asyncio
@@ -447,7 +460,7 @@ async def test_generate_dlp_block(client: AsyncClient):
         json={"prompt": "We guarantee returns of 20%", "deck_type": "sales_9"},
     )
     assert resp.status_code == 400
-    assert "guarantee returns" in resp.json()["detail"]
+    assert "guarantee returns" in resp.json()["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -464,7 +477,7 @@ async def test_refine_dlp_block(client: AsyncClient):
     )
 
     assert resp.status_code == 400
-    assert "risk-free" in resp.json()["detail"]
+    assert "risk-free" in resp.json()["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -519,6 +532,7 @@ async def test_refine_nonexistent_session(client: AsyncClient):
         json={"session_id": "does-not-exist", "slide_index": 1, "instruction": "shorter"},
     )
     assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "SESSION_NOT_FOUND"
 
 
 @pytest.mark.asyncio
@@ -581,14 +595,15 @@ async def test_export_rejects_invalid_pptx_before_upload(
             return "http://test/api/v1/download/bad.pptx"
 
     monkeypatch.setattr(export_router, "PptxEngine", BadEngine)
-    monkeypatch.setattr(providers, "get_storage_service", lambda: RecordingStorage())
+    _patch_storage(monkeypatch, RecordingStorage())
 
     resp = await client.post(
         "/api/v1/export",
         json={"session_id": session_id},
     )
 
-    assert resp.status_code == 500
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "GENERATION_ERROR"
     assert uploaded == []
 
 
@@ -605,7 +620,7 @@ async def test_export_audit_slide_count_matches_rendered_pptx(
                 SlideData(index=2, title="Action Plan", bullets=["Review"], notes="", layout="next_steps"),
             ]
 
-    monkeypatch.setattr(providers, "get_generator_service", lambda: ShortGenerator())
+    _patch_generator(monkeypatch, ShortGenerator())
     audit = providers.get_audit_service()
     audit.clear_events()
 
