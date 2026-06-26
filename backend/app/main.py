@@ -10,7 +10,7 @@ from app.config import settings
 from app.errors import ConfigurationError
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.rate_limit import register_rate_limiter
-from app.routers import generate, health, refine, export, uploads, v2
+from app.routers import decks, generate, health, refine, export, uploads, v2
 from app.services.platform.storage import StorageService
 from app.services.platform.uploads import UploadService
 
@@ -92,6 +92,7 @@ app.include_router(refine.router, prefix="/api/v1", tags=["refine"])
 app.include_router(export.router, prefix="/api/v1", tags=["export"])
 app.include_router(uploads.router, prefix="/api/v1", tags=["uploads"])
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
+app.include_router(decks.router, prefix="/api/v1", tags=["decks"])
 
 def purge_local_temp_files() -> dict[str, int]:
     return {
