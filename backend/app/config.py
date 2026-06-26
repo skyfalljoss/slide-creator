@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     audit_enabled: bool = True
     session_ttl_minutes: int = 30
     signed_url_expiry_minutes: int = 30
+    deck_db_path: str = ".data/decks.db"
     max_prompt_length: int = 5000
     citi_sso_enabled: bool = False
     allowed_origins: list[str] = ["http://localhost:5173"]
