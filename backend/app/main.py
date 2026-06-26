@@ -50,6 +50,8 @@ def _configure_logging() -> None:
 async def lifespan(app: FastAPI):
     _configure_logging()
     _validate_config()
+    from app.dependencies import get_deck_store
+    await get_deck_store().initialize()
     purge_local_temp_files()
     yield
     from app.dependencies import get_http_client

@@ -9,6 +9,7 @@ from app.services.platform.session import LocalSessionStore, SessionStore
 from app.services.platform.storage import StorageService
 from app.services.generation.gemini import GeminiService
 from app.services.generation.gemini_api import GeminiApiService
+from app.services.platform.deck_store import DeckStore
 
 
 _audit_service = AuditService()
@@ -56,3 +57,13 @@ def get_http_client() -> httpx.AsyncClient:
 
 def get_audit_service() -> AuditService:
     return _audit_service
+
+
+_deck_store: DeckStore | None = None
+
+
+def get_deck_store() -> DeckStore:
+    global _deck_store
+    if _deck_store is None:
+        _deck_store = DeckStore(settings.deck_db_path)
+    return _deck_store
