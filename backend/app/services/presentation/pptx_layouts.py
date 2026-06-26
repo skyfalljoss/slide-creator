@@ -46,7 +46,7 @@ class PptxLayoutMixin:
             self._add_text(slide, LAYOUT.left_margin, subtitle_top, 9.0, 0.8, subtitle, 22, self.theme.muted)
         if secondary:
             secondary_top = subtitle_top + (0.92 if subtitle else 0)
-            self._add_bullets_box(slide, secondary[:3], LAYOUT.left_margin, secondary_top, 9.2, 1.15)
+            self._add_bullets_box(slide, secondary, LAYOUT.left_margin, secondary_top, 9.2, 2.5)
 
     @staticmethod
     def _title_slide_title_height(title: str, width: float) -> float:
@@ -63,7 +63,8 @@ class PptxLayoutMixin:
         if data.subtitle:
             self._add_text(slide, LAYOUT.left_margin, 6.25, 11.5, 0.75, data.subtitle, 22, self.theme.muted)
         elif data.bullets:
-            self._add_text(slide, LAYOUT.left_margin, 6.25, 11.5, 0.75, data.bullets[0], 22, self.theme.muted)
+            bullet_text = "\n".join(data.bullets)
+            self._add_card_text(slide, LAYOUT.left_margin, 6.25, 11.5, 2.5, bullet_text, 18, self.theme.muted)
 
     @register_variant("three_points")
     def _apply_three_points(self, slide: Slide, data: SlideData) -> None:
@@ -72,7 +73,9 @@ class PptxLayoutMixin:
         if block and str(block.get("type", "")).lower() in ("cards", "card_grid", "grid", "columns"):
             self._block_cards(slide, block, LAYOUT.left_margin, top, LAYOUT.content_width, LAYOUT.content_bottom - top)
             return
-        items = [{"title": item, "body": ""} for item in data.bullets[:3]]
+        card_items = data.bullets[:3]
+        extra_items = data.bullets[3:]
+        items = [{"title": item, "body": ""} for item in card_items]
         self._block_cards(
             slide,
             {"type": "cards", "columns": min(max(len(items), 1), 3), "items": items},
@@ -81,6 +84,9 @@ class PptxLayoutMixin:
             LAYOUT.content_width,
             LAYOUT.content_bottom - top,
         )
+        if extra_items:
+            detail_top = top + 4.0
+            self._add_bullets_box(slide, extra_items, LAYOUT.left_margin, detail_top, LAYOUT.content_width, 1.5)
 
     @register_variant("split_image")
     def _apply_split_image(self, slide: Slide, data: SlideData) -> None:
@@ -98,7 +104,7 @@ class PptxLayoutMixin:
                 self._add_text(slide, left, text_top, 7.2, 0.8, data.subtitle, 19, self.theme.muted)
                 text_top += 1.0
             if data.bullets:
-                self._add_bullets_box(slide, data.bullets[:4], left, text_top, 7.2, 3.0)
+                self._add_bullets_box(slide, data.bullets, left, text_top, 7.2, 4.0)
 
         img_left = 9.7
         img_top = 1.6
@@ -127,6 +133,9 @@ class PptxLayoutMixin:
             self._add_text(slide, 2.4, 4.65, self._LOGICAL_WIDTH - 4.8, 0.9, label, 28, self.theme.text, bold=True, align=PP_ALIGN.CENTER)
         if data.title and data.title != value:
             self._add_text(slide, 2.8, 5.75, self._LOGICAL_WIDTH - 5.6, 0.7, data.title, 20, self.theme.muted, align=PP_ALIGN.CENTER)
+        remaining = data.bullets[1:] if data.subtitle else data.bullets[1:]
+        if remaining:
+            self._add_bullets_box(slide, remaining, LAYOUT.left_margin, 5.5, LAYOUT.content_width, 2.5)
 
     @register_variant("before_after")
     def _apply_before_after(self, slide: Slide, data: SlideData) -> None:
@@ -178,6 +187,9 @@ class PptxLayoutMixin:
             LAYOUT.content_width,
             4.2,
         )
+        process_extra = data.bullets[4:]
+        if process_extra:
+            self._add_bullets_box(slide, process_extra, LAYOUT.left_margin, 5.5, LAYOUT.content_width, 1.5)
 
     @register_variant("quote")
     def _apply_quote_variant(self, slide: Slide, data: SlideData) -> None:
@@ -207,7 +219,7 @@ class PptxLayoutMixin:
         if block and str(block.get("type", "")).lower() in ("process", "steps", "timeline"):
             self._block_process(slide, block, LAYOUT.left_margin, 6.45, LAYOUT.content_width, 2.0)
         elif data.bullets:
-            self._add_bullets_box(slide, data.bullets[:3], LAYOUT.left_margin, 6.35, 9.0, 1.6)
+            self._add_bullets_box(slide, data.bullets, LAYOUT.left_margin, 6.35, 9.0, 2.5)
 
     def _comparison_card(self, slide: Slide, x: float, y: float, w: float, h: float, title: str, items: list[str], *, muted: bool) -> None:
         border = self.theme.muted if muted else self.theme.accent
@@ -301,7 +313,7 @@ class PptxLayoutMixin:
     def _apply_next_steps(self, slide: Slide, data: SlideData) -> None:
         top = self._add_content_header(slide, data.title, getattr(data, "kicker", None) or "NEXT STEPS")
         bullets = data.bullets or []
-        steps = bullets[:3]
+        steps = bullets[:5]
         if not steps:
             self._add_visual_panel(slide, data, LAYOUT.left_margin, top, LAYOUT.content_width, LAYOUT.content_bottom - top)
             return
@@ -317,7 +329,7 @@ class PptxLayoutMixin:
             self._add_number_circle(slide, x + 0.45, top + 0.45, i + 1)
             self._add_card_text(slide, x + 0.45, top + 1.5, cw - 0.9, ch - 1.8, bullet, 18, self.theme.text)
 
-        lower = bullets[3:]
+        lower = bullets[5:]
         if lower:
             sy = top + ch + 0.5
             self._add_eyebrow(slide, LAYOUT.left_margin, sy, "Recommended Timeline")
@@ -336,6 +348,9 @@ class PptxLayoutMixin:
 
     def _apply_standard_content(self, slide: Slide, data: SlideData) -> None:
         top = self._add_content_header(slide, data.title, getattr(data, "kicker", None))
+        if data.callout:
+            self._add_callout_box(slide, data.callout, LAYOUT.left_margin, top, LAYOUT.content_width, 0.6)
+            top += 0.85
         if data.bullets:
             self._add_modern_bullet_panel(slide, data.bullets, top)
         else:
@@ -397,6 +412,4 @@ class PptxLayoutMixin:
         panel_h = min(LAYOUT.content_bottom - top, 5.9)
         self._add_card(slide, LAYOUT.left_margin, top, 10.8, panel_h)
         self._add_accent_bar(slide, LAYOUT.left_margin + 0.48, top + 0.52, 1.0, height=0.05)
-        self._add_bullets_box(slide, items[:5], LAYOUT.left_margin + 0.55, top + 0.95, 9.4, panel_h - 1.25)
-        if len(items) > 5:
-            self._add_text(slide, LAYOUT.left_margin + 0.55, top + panel_h - 0.45, 8.5, 0.35, f"+ {len(items) - 5} additional points", 13, self.theme.muted)
+        self._add_bullets_box(slide, items, LAYOUT.left_margin + 0.55, top + 0.95, 9.4, panel_h - 1.25)
