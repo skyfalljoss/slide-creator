@@ -62,7 +62,7 @@ async def generate(
     audit.record(
         action="generate",
         session_id=session_id,
-        deck_type=req.deck_type,
+        deck_type=req.deck_type or "unknown",
         slide_count=len(slides),
         user_id=get_user_id(request),
         model=settings.gemini_model,
@@ -74,7 +74,9 @@ async def generate(
 def _max_slide_count(req: GenerateRequest) -> int:
     if req.source_type == "script":
         return MAX_SCRIPT_SLIDES
-    return SLIDE_COUNTS[req.deck_type] + SLIDE_COUNT_TOLERANCE
+    if req.deck_type and req.deck_type in SLIDE_COUNTS:
+        return SLIDE_COUNTS[req.deck_type] + SLIDE_COUNT_TOLERANCE
+    return MAX_SCRIPT_SLIDES
 
 
 async def _resolve_slide_images(slides: list[SlideData]) -> None:

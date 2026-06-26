@@ -75,7 +75,7 @@ async def refine(
     audit.record(
         action="refine",
         session_id=req.session_id,
-        deck_type=session["deck_type"],
+        deck_type=session.get("deck_type") or "unknown",
         slide_count=len(session["slides"]),
         slide_index=req.slide_index,
         user_id=get_user_id(request),

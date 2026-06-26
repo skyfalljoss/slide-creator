@@ -509,7 +509,7 @@ def test_title_slide_adds_image_when_present():
     prs = Presentation(BytesIO(PptxEngine().render(slides)))
     pictures = [sh for sh in prs.slides[0].shapes if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
     assert pictures
-    assert pictures[0].left == Inches(10.95)
+    assert pictures[0].left == Inches(10.15)
     assert pictures[0].top == Inches(0.92)
 
 

@@ -18,7 +18,7 @@ class GeminiService:
             return _script_mock_slides(req.prompt)
         slides = _mock_slides(req.deck_type)
         if chart_data:
-            chart_slide_index = 4 if req.deck_type == "internal_6" else 6
+            chart_slide_index = 4 if req.deck_type and req.deck_type == "internal_6" else 6
             slides[chart_slide_index - 1].chart_data = chart_data
         return slides
 
@@ -43,7 +43,7 @@ class GeminiService:
         )
 
 
-def _mock_slides(deck_type: str) -> list[SlideData]:
+def _mock_slides(deck_type: str | None) -> list[SlideData]:
     if deck_type == "internal_6":
         return [
             SlideData(index=1, title="Project Alpha", subtitle="Q2 2026 internal review", bullets=["Q2 2026 Initiative", "Owner: J. Smith", "Launch target: July 2026"], notes="Opening slide for internal review.", layout="title", variant="cover", visual_direction="Framework cover slide with large title and Citi accent."),

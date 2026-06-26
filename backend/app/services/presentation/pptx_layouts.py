@@ -8,6 +8,7 @@ from pptx.slide import Slide
 
 from app.models.schemas import SlideData
 from app.services.presentation.pptx_layout import LAYOUT
+from app.services.presentation.variants import register_variant
 from app.services.presentation.pptx_text import (
     is_leaked_instruction as _is_leaked_instruction,
     looks_like_instruction as _looks_like_instruction,
@@ -20,7 +21,7 @@ class PptxLayoutMixin:
     """Slide-specific layout renderers for the PPTX engine."""
 
     def _apply_title_slide(self, slide: Slide, data: SlideData) -> None:
-        image_left = 10.95
+        image_left = 10.15
         image_top = 0.92
         image_width = 6.8
         image_height = 8.14
@@ -31,7 +32,7 @@ class PptxLayoutMixin:
             self._add_eyebrow(slide, LAYOUT.left_margin, 3.05, kicker)
 
         title_top = 3.45
-        title_width = 9.7
+        title_width = 8.9
         title_height = self._title_slide_title_height(data.title, title_width)
         self._add_text(slide, LAYOUT.left_margin, title_top, title_width, title_height, data.title, 48, self.theme.text, bold=True)
 
@@ -53,6 +54,7 @@ class PptxLayoutMixin:
         lines = textwrap.wrap(title or "", width=chars_per_line) or [""]
         return min(max(1.25, len(lines) * 0.72), 3.25)
 
+    @register_variant("big_statement")
     def _apply_big_statement(self, slide: Slide, data: SlideData) -> None:
         label = getattr(data, "kicker", None) or "CORE INSIGHT"
         self._add_eyebrow(slide, LAYOUT.left_margin, 2.25, label)
@@ -63,6 +65,7 @@ class PptxLayoutMixin:
         elif data.bullets:
             self._add_text(slide, LAYOUT.left_margin, 6.25, 11.5, 0.75, data.bullets[0], 22, self.theme.muted)
 
+    @register_variant("three_points")
     def _apply_three_points(self, slide: Slide, data: SlideData) -> None:
         top = self._add_content_header(slide, data.title, getattr(data, "kicker", None), getattr(data, "subtitle", None))
         block = self._first_block(data)
@@ -79,6 +82,7 @@ class PptxLayoutMixin:
             LAYOUT.content_bottom - top,
         )
 
+    @register_variant("split_image")
     def _apply_split_image(self, slide: Slide, data: SlideData) -> None:
         left = LAYOUT.left_margin
         top = 1.55
@@ -103,6 +107,7 @@ class PptxLayoutMixin:
         if not self._add_slide_image(slide, getattr(data, "image_b64", None), img_left, img_top, img_w, img_h):
             self._add_image_placeholder(slide, img_left, img_top, img_w, img_h)
 
+    @register_variant("big_stat")
     def _apply_big_stat(self, slide: Slide, data: SlideData) -> None:
         block = self._first_block(data) or {}
         value = str(block.get("value") or block.get("number") or "")
@@ -123,6 +128,7 @@ class PptxLayoutMixin:
         if data.title and data.title != value:
             self._add_text(slide, 2.8, 5.75, self._LOGICAL_WIDTH - 5.6, 0.7, data.title, 20, self.theme.muted, align=PP_ALIGN.CENTER)
 
+    @register_variant("before_after")
     def _apply_before_after(self, slide: Slide, data: SlideData) -> None:
         top = self._add_content_header(slide, data.title, getattr(data, "kicker", None), getattr(data, "subtitle", None))
         block = self._first_block(data) or {}
@@ -147,6 +153,7 @@ class PptxLayoutMixin:
         self._comparison_card(slide, LAYOUT.left_margin, top, 7.85, 4.9, before_title, before_items, muted=True)
         self._comparison_card(slide, 9.1, top, 7.85, 4.9, after_title, after_items, muted=False)
 
+    @register_variant("comparison_table")
     def _apply_comparison_table(self, slide: Slide, data: SlideData) -> None:
         top = self._add_content_header(slide, data.title, getattr(data, "kicker", None), getattr(data, "subtitle", None))
         block = self._first_block(data)
@@ -156,6 +163,7 @@ class PptxLayoutMixin:
         rows = [_table_row_from_text(item) for item in data.bullets]
         self._block_table(slide, {"headers": ["Topic", "Detail"], "rows": rows}, LAYOUT.left_margin, top + 0.15, LAYOUT.content_width, 8.6 - top)
 
+    @register_variant("process")
     def _apply_process_variant(self, slide: Slide, data: SlideData) -> None:
         top = self._add_content_header(slide, data.title, getattr(data, "kicker", None), getattr(data, "subtitle", None))
         block = self._first_block(data)
@@ -171,6 +179,7 @@ class PptxLayoutMixin:
             4.2,
         )
 
+    @register_variant("quote")
     def _apply_quote_variant(self, slide: Slide, data: SlideData) -> None:
         block = self._first_block(data) or {}
         quote = str(block.get("text") or block.get("quote") or (data.bullets[0] if data.bullets else data.title))
@@ -186,6 +195,7 @@ class PptxLayoutMixin:
         if getattr(data, "image_b64", None):
             self._add_slide_image(slide, data.image_b64, 12.9, 5.85, 3.6, 2.15)
 
+    @register_variant("closing")
     def _apply_closing(self, slide: Slide, data: SlideData) -> None:
         label = getattr(data, "kicker", None) or "NEXT STEPS"
         self._add_eyebrow(slide, LAYOUT.left_margin, 2.6, label)

@@ -13,7 +13,6 @@ from app.main import app, purge_local_temp_files
 from app.routers import export as export_router, generate as generate_router, refine as refine_router, uploads
 from app.models.schemas import ChartRecommendation, SlideData
 from app import dependencies
-from app.services.generation import providers
 from app.routers.uploads import upload_file
 
 
@@ -77,7 +76,7 @@ async def test_generate_internal(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_generate_records_user_id_from_header(client: AsyncClient):
-    audit = providers.get_audit_service()
+    audit = dependencies.get_audit_service()
     audit.clear_events()
 
     try:
@@ -621,7 +620,7 @@ async def test_export_audit_slide_count_matches_rendered_pptx(
             ]
 
     _patch_generator(monkeypatch, ShortGenerator())
-    audit = providers.get_audit_service()
+    audit = dependencies.get_audit_service()
     audit.clear_events()
 
     gen = await client.post(

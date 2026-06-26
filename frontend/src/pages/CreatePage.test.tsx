@@ -72,7 +72,7 @@ describe('CreatePage', () => {
     })
     renderCreatePage()
 
-    fireEvent.click(screen.getByRole('button', { name: /paste a script/i }))
+    fireEvent.click(screen.getByRole('button', { name: /paste script/i }))
     fireEvent.change(screen.getByLabelText(/paste your script/i), { target: { value: 'Para one.\n\nPara two.' } })
     fireEvent.change(screen.getByLabelText(/target audience/i), { target: { value: 'academic' } })
     fireEvent.click(screen.getByRole('button', { name: /dark mode/i }))

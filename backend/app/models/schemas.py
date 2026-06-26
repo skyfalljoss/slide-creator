@@ -18,7 +18,7 @@ SlideVariant = Literal[
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=50000)
-    deck_type: Literal["sales_9", "internal_6"]
+    deck_type: str | None = None
     source_type: Literal["brief", "script"] = "brief"
     target_audience: Literal["corporate", "casual", "academic"] = "corporate"
     theme: Literal["minimalist", "bold", "dark"] = "minimalist"

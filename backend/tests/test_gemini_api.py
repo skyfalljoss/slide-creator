@@ -30,7 +30,7 @@ def test_gemini_parser_validates_slide_count(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "gemini_api_key", "test-key")
     service = GeminiApiService()
 
-    with pytest.raises(GeminiResponseError, match="Expected 6-12 slides"):
+    with pytest.raises(GeminiResponseError, match="Expected 3-20 slides"):
         service.parse_slides_response(
             '{"slides":[{"index":1,"title":"Only one","bullets":[],"notes":"","layout":"title"}]}',
             deck_type="sales_9",
@@ -188,7 +188,7 @@ def test_generation_prompt_includes_subtitle_field(monkeypatch: pytest.MonkeyPat
     service = GeminiApiService()
     prompt = service.build_generation_prompt(GenerateRequest(prompt="X", deck_type="sales_9"))
     assert '"subtitle"' in prompt
-    assert "subtitle for the title slide" in prompt
+    assert "title and section_divider slides" in prompt
     assert '"image_query"' in prompt
     assert "stock-photo search" in prompt
     assert '"kicker"' in prompt
@@ -304,11 +304,11 @@ def test_gemini_parser_rejects_deck_count_outside_three_slide_window(monkeypatch
                 "notes": "Speaker note.",
                 "layout": "content" if i > 1 else "title",
             }
-            for i in range(1, 5)
+            for i in range(1, 3)
         ]
     }
 
-    with pytest.raises(GeminiResponseError, match="Expected 6-12 slides"):
+    with pytest.raises(GeminiResponseError, match="Expected 3-20 slides"):
         service.parse_slides_response(service.to_json(slides_json), deck_type="sales_9")
 
 

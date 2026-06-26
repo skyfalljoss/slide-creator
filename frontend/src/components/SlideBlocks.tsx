@@ -29,7 +29,7 @@ function normItems(items?: Array<string | SlideBlockItem>): SlideBlockItem[] {
 
 function Chip({ icon }: { icon?: string }) {
   return (
-    <span className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-md bg-citi-red/10 text-citi-red">
+    <span className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-md bg-rose-500/15 text-rose-300">
       <i className={`fa-solid ${faClass(icon)} text-sm`} aria-hidden="true" />
     </span>
   )
@@ -41,9 +41,9 @@ function BlockView({ block }: { block: SlideBlock }) {
   if (type === 'stat') {
     return (
       <div className="flex h-full flex-col items-center justify-center text-center">
-        <div className="text-5xl font-bold tracking-tight text-citi-red">{block.value || block.number}</div>
+        <div className="text-5xl font-bold tracking-tight text-rose-400">{block.value || block.number}</div>
         {(block.label || block.caption) && (
-          <div className="mt-2 text-sm font-medium text-citi-dark">{block.label || block.caption}</div>
+          <div className="mt-2 text-sm font-medium text-slate-200">{block.label || block.caption}</div>
         )}
       </div>
     )
@@ -53,8 +53,8 @@ function BlockView({ block }: { block: SlideBlock }) {
     return (
       <div className="flex h-full items-center">
         <div className="border-l-4 border-citi-red pl-4">
-          <p className="text-lg font-semibold leading-snug text-citi-dark">&ldquo;{block.text || block.quote}&rdquo;</p>
-          {block.author && <p className="mt-2 text-xs uppercase tracking-wide text-slate-500">{block.author}</p>}
+          <p className="text-lg font-semibold leading-snug text-slate-100">&ldquo;{block.text || block.quote}&rdquo;</p>
+          {block.author && <p className="mt-2 text-xs uppercase tracking-wide text-slate-400">{block.author}</p>}
         </div>
       </div>
     )
@@ -69,7 +69,7 @@ function BlockView({ block }: { block: SlideBlock }) {
           <thead>
             <tr>
               {headers.map((h, i) => (
-                <th key={i} className="border-b-2 border-slate-300 px-2 py-1.5 font-semibold text-citi-dark">{h}</th>
+                <th key={i} className="border-b-2 border-white/20 px-2 py-1.5 font-semibold text-slate-200">{h}</th>
               ))}
             </tr>
           </thead>
@@ -78,7 +78,7 @@ function BlockView({ block }: { block: SlideBlock }) {
           {rows.map((r, ri) => (
             <tr key={ri}>
               {r.map((c, ci) => (
-                <td key={ci} className={`border-b border-slate-200 px-2 py-1.5 ${ci === 0 ? 'font-medium text-citi-dark' : 'text-slate-600'}`}>{c}</td>
+                <td key={ci} className={`border-b border-white/10 px-2 py-1.5 ${ci === 0 ? 'font-medium text-slate-200' : 'text-slate-400'}`}>{c}</td>
               ))}
             </tr>
           ))}
@@ -92,10 +92,10 @@ function BlockView({ block }: { block: SlideBlock }) {
     return (
       <div className="grid h-full gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(steps.length, 1)}, minmax(0, 1fr))` }}>
         {steps.map((s, i) => (
-          <div key={i} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div key={i} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-citi-red text-xs font-bold text-white">{i + 1}</span>
-            {s.title && <div className="mt-2 text-sm font-semibold text-citi-dark">{s.title}</div>}
-            {(s.body || s.text) && <div className="mt-1 text-xs text-slate-600">{s.body || s.text}</div>}
+            {s.title && <div className="mt-2 text-sm font-semibold text-slate-100">{s.title}</div>}
+            {(s.body || s.text) && <div className="mt-1 text-xs text-slate-400">{s.body || s.text}</div>}
           </div>
         ))}
       </div>
@@ -108,10 +108,10 @@ function BlockView({ block }: { block: SlideBlock }) {
     return (
       <div className="grid h-full gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {items.map((it, i) => (
-          <div key={i} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div key={i} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
             <Chip icon={it.icon || it.title} />
-            {it.title && <div className="text-sm font-semibold text-citi-dark">{it.title}</div>}
-            {(it.body || it.text) && <div className="mt-1 text-xs text-slate-600">{it.body || it.text}</div>}
+            {it.title && <div className="text-sm font-semibold text-slate-100">{it.title}</div>}
+            {(it.body || it.text) && <div className="mt-1 text-xs text-slate-400">{it.body || it.text}</div>}
           </div>
         ))}
       </div>
@@ -123,7 +123,7 @@ function BlockView({ block }: { block: SlideBlock }) {
   return (
     <ul className="space-y-2">
       {items.map((it, i) => (
-        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+        <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
           <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-citi-red" />
           <span>{it.title || it.body || it.text}</span>
         </li>

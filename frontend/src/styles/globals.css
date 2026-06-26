@@ -1,9 +1,193 @@
 @import "tailwindcss";
 
 @theme {
-  --color-citi-blue: #056DAE;
-  --color-citi-red: #E31837;
-  --color-citi-gray: #F5F7FA;
-  --color-citi-dark: #1E293B;
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  /* Legacy Citi brand tokens (kept for non-redesigned pages) */
+  --color-citi-blue: #056dae;
+  --color-citi-red: #e31837;
+  --color-citi-gray: #f5f7fa;
+  --color-citi-dark: #1e293b;
+
+  /* Futuristic "SaaS Modern" dark theme */
+  --color-space-950: #050816;
+  --color-space-900: #070b1a;
+  --color-space-800: #0b1228;
+  --color-space-700: #111a35;
+  --color-space-600: #18254a;
+
+  --color-accent-cyan: #38bdf8;
+  --color-accent-blue: #3b82f6;
+  --color-accent-indigo: #6366f1;
+  --color-accent-violet: #8b5cf6;
+
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Sora", "Inter", system-ui, sans-serif;
+
+  --animate-pulse-glow: pulse-glow 2.6s ease-in-out infinite;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-drift: drift 90s linear infinite;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-orbit: orbit 2.4s linear infinite;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 22px 0 rgba(99, 102, 241, 0.5),
+      0 0 60px 0 rgba(139, 92, 246, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 40px 6px rgba(139, 92, 246, 0.7),
+      0 0 90px 10px rgba(59, 130, 246, 0.35);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes drift {
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      600px 300px,
+      -400px 200px;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-space-950);
+    color: #e2e8f0;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Style native option dropdowns so they don't flash white */
+  select option {
+    background-color: #0b1228;
+    color: #e2e8f0;
+  }
+}
+
+@layer components {
+  /* Glassmorphism surface used by every card in the create flow */
+  .glass-card {
+    position: relative;
+    border-radius: 1rem;
+    border: 1px solid rgba(120, 160, 255, 0.14);
+    background:
+      linear-gradient(
+        160deg,
+        rgba(30, 41, 78, 0.62),
+        rgba(12, 18, 38, 0.62)
+      );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow:
+      0 10px 36px rgba(2, 6, 23, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  /* Selectable option tile (input mode, theme, deck type, aspect ratio) */
+  .tile {
+    border-radius: 0.75rem;
+    border: 1px solid rgba(120, 160, 255, 0.16);
+    background: rgba(15, 23, 48, 0.5);
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease,
+      background-color 0.2s ease,
+      transform 0.15s ease;
+  }
+  .tile:hover {
+    border-color: rgba(120, 160, 255, 0.4);
+    transform: translateY(-1px);
+  }
+  .tile-active {
+    border-color: rgba(99, 102, 241, 0.9);
+    background: rgba(59, 130, 246, 0.1);
+    box-shadow:
+      0 0 0 1px rgba(99, 102, 241, 0.55),
+      0 0 26px rgba(99, 102, 241, 0.3);
+  }
+
+  /* Dark form controls */
+  .field {
+    border-radius: 0.75rem;
+    border: 1px solid rgba(120, 160, 255, 0.18);
+    background: rgba(8, 13, 30, 0.7);
+    color: #e2e8f0;
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .field::placeholder {
+    color: rgba(148, 163, 184, 0.6);
+  }
+  .field:focus {
+    outline: none;
+    border-color: rgba(99, 102, 241, 0.8);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+  }
+
+  /* Glowing primary CTA */
+  .btn-glow {
+    background-image: linear-gradient(
+      100deg,
+      #4f46e5 0%,
+      #7c3aed 50%,
+      #2563eb 100%
+    );
+    color: #fff;
+    box-shadow:
+      0 0 22px rgba(99, 102, 241, 0.5),
+      0 0 60px rgba(139, 92, 246, 0.25);
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.25s ease,
+      filter 0.2s ease;
+  }
+  .btn-glow:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+    box-shadow:
+      0 0 34px rgba(139, 92, 246, 0.7),
+      0 0 90px rgba(59, 130, 246, 0.4);
+  }
 }

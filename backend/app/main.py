@@ -10,7 +10,7 @@ from app.config import settings
 from app.errors import ConfigurationError
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.rate_limit import register_rate_limiter
-from app.routers import generate, health, refine, export, uploads
+from app.routers import generate, health, refine, export, uploads, v2
 from app.services.platform.storage import StorageService
 from app.services.platform.uploads import UploadService
 
@@ -74,6 +74,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+APP_VERSION = "1.0.0"
+
+
+@app.middleware("http")
+async def add_api_version_header(request, call_next):
+    response = await call_next(request)
+    response.headers["X-API-Version"] = APP_VERSION
+    return response
+
+
+app.include_router(v2.router, prefix="/api/v2", tags=["v2"])
 app.include_router(generate.router, prefix="/api/v1", tags=["generate"])
 app.include_router(refine.router, prefix="/api/v1", tags=["refine"])
 app.include_router(export.router, prefix="/api/v1", tags=["export"])

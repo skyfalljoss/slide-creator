@@ -52,7 +52,8 @@ async def export_deck(
         theme=session.get("theme", "minimalist"),
         aspect_ratio=session.get("aspect_ratio", "16:9"),
     )
-    max_count = SLIDE_COUNTS.get(session["deck_type"], len(session["slides"]) + 1) + SLIDE_COUNT_TOLERANCE
+    deck_type = session.get("deck_type", "")
+    max_count = SLIDE_COUNTS.get(deck_type, len(session["slides"]) + 1) + SLIDE_COUNT_TOLERANCE
     slides = normalize_deck(session["slides"], max_count=max_count)
     session["slides"] = slides
     pptx_bytes = engine.render(slides)
@@ -67,7 +68,7 @@ async def export_deck(
     audit.record(
         action="export",
         session_id=req.session_id,
-        deck_type=session["deck_type"],
+        deck_type=session.get("deck_type") or "unknown",
         slide_count=len(slides),
         user_id=get_user_id(request),
         model=settings.gemini_model,

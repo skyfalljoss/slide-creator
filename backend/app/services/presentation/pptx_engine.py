@@ -180,17 +180,9 @@ class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
         }
 
     def _framework_variant_handlers(self):
-        return {
-            "big_statement": self._apply_big_statement,
-            "three_points": self._apply_three_points,
-            "split_image": self._apply_split_image,
-            "big_stat": self._apply_big_stat,
-            "before_after": self._apply_before_after,
-            "comparison_table": self._apply_comparison_table,
-            "process": self._apply_process_variant,
-            "quote": self._apply_quote_variant,
-            "closing": self._apply_closing,
-        }
+        from app.services.presentation.variants import _VARIANTS
+
+        return {name: getattr(self, func.__name__) for name, func in _VARIANTS.items()}
 
     def _variant_for(self, data: SlideData) -> str | None:
         variant = (getattr(data, "variant", None) or "").lower().strip()
