@@ -66,3 +66,57 @@ def test_dlp_violation_with_empty_terms():
     err = DlpViolationError(terms=[])
     assert err.code == "DLP_VIOLATION"
     assert err.message == "Prompt contains prohibited terms: "
+
+
+def test_error_handler_returns_structured_json():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.middleware.error_handler import register_error_handlers
+
+    app = FastAPI()
+    register_error_handlers(app)
+
+    @app.get("/fail-dlp")
+    def fail_dlp():
+        raise DlpViolationError(terms=["risk-free"])
+
+    @app.get("/fail-session")
+    def fail_session():
+        raise SessionNotFoundError("abc-123")
+
+    @app.get("/fail-config")
+    def fail_config():
+        raise ConfigurationError("missing key")
+
+    @app.get("/fail-generation")
+    def fail_generation():
+        raise GenerationError("model timeout")
+
+    @app.get("/fail-generic")
+    def fail_generic():
+        raise RuntimeError("oops")
+
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.get("/fail-dlp")
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["error"]["code"] == "DLP_VIOLATION"
+    assert "risk-free" in body["error"]["message"]
+
+    resp = client.get("/fail-session")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "SESSION_NOT_FOUND"
+
+    resp = client.get("/fail-config")
+    assert resp.status_code == 500
+    assert resp.json()["error"]["code"] == "CONFIG_ERROR"
+
+    resp = client.get("/fail-generation")
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "GENERATION_ERROR"
+
+    resp = client.get("/fail-generic")
+    assert resp.status_code == 500
+    assert resp.json()["error"]["code"] == "INTERNAL_ERROR"
