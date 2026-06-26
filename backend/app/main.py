@@ -1,4 +1,7 @@
+import logging
 from contextlib import asynccontextmanager
+
+import structlog
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -20,8 +23,31 @@ def _validate_config() -> None:
         raise ConfigurationError("GCS_BUCKET is required when STORAGE_PROVIDER=gcs")
 
 
+def _configure_logging() -> None:
+    if settings.log_format == "json":
+        structlog.configure(
+            processors=[
+                structlog.contextvars.merge_contextvars,
+                structlog.processors.add_log_level,
+                structlog.processors.StackFormatterRenderer(),
+                structlog.processors.JSONRenderer(),
+            ],
+            wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+            logger_factory=structlog.PrintLoggerFactory(),
+        )
+    else:
+        structlog.configure(
+            processors=[
+                structlog.contextvars.merge_contextvars,
+                structlog.dev.ConsoleRenderer(),
+            ],
+            logger_factory=structlog.PrintLoggerFactory(),
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _configure_logging()
     _validate_config()
     purge_local_temp_files()
     yield
