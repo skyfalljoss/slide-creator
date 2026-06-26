@@ -181,3 +181,57 @@ class ExportRequest(BaseModel):
 class ExportResponse(BaseModel):
     download_url: str
     expires_at: datetime
+
+
+class DeckSummary(BaseModel):
+    id: str
+    name: str
+    deck_type: str
+    slide_count: int
+    thumbnail_b64: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class DeckDetail(BaseModel):
+    id: str
+    name: str
+    deck_type: str
+    theme: str
+    aspect_ratio: str
+    slides: list[SlideData]
+    thumbnail_b64: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class SaveDeckRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=500)
+    deck_type: str
+    theme: str = "minimalist"
+    aspect_ratio: str = "16:9"
+    slides: list[SlideData]
+    thumbnail_b64: str | None = None
+
+
+class UpdateDeckRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=500)
+    slides: list[SlideData] | None = None
+
+
+class SaveDeckResponse(BaseModel):
+    id: str
+    name: str
+    created_at: str
+
+
+class UpdateDeckResponse(BaseModel):
+    updated_at: str
+
+
+class DeleteDeckResponse(BaseModel):
+    ok: bool
+
+
+class ListDecksResponse(BaseModel):
+    decks: list[DeckSummary]
