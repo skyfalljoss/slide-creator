@@ -6,6 +6,7 @@ import { CreatePage } from '@/pages/CreatePage'
 import { PreviewPage } from '@/pages/PreviewPage'
 import { ExportPage } from '@/pages/ExportPage'
 import { MyDecksPage } from '@/pages/MyDecksPage'
+import { EditorPage } from '@/pages/EditorPage'
 import { DeckProvider } from '@/state/DeckContext'
 
 const queryClient = new QueryClient()
@@ -22,6 +23,7 @@ export default function App() {
               <Route path="/preview" element={<PreviewPage />} />
               <Route path="/export" element={<ExportPage />} />
               <Route path="/my-decks" element={<MyDecksPage />} />
+              <Route path="/editor/:deckId" element={<EditorPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/create" replace />} />
           </Routes>
