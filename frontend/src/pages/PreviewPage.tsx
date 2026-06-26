@@ -3,7 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
-import { refine } from '@/lib/api'
+import { refine, saveDeck } from '@/lib/api'
 import { useDeck } from '@/state/deck'
 import { SlideBlocks } from '@/components/SlideBlocks'
 
@@ -16,6 +16,11 @@ export function PreviewPage() {
   const [designOpen, setDesignOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const refineMutation = useMutation({ mutationFn: refine })
+  const saveMutation = useMutation({
+    mutationFn: saveDeck,
+    onSuccess: () => navigate('/my-decks'),
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save deck'),
+  })
 
   if (!state.sessionId || state.slides.length === 0) {
     return <Navigate to="/create" replace />
@@ -45,7 +50,25 @@ export function PreviewPage() {
           <h2 className="font-display text-3xl font-bold tracking-tight text-white">Preview &amp; Refine</h2>
           <p className="mt-1 text-slate-400">Review your slides, edit bullets, or refine with AI.</p>
         </div>
-        <Button variant="glow" onClick={() => navigate('/export')}>Export to PPTX</Button>
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            className="border-white/15 bg-white/5 text-slate-200 hover:border-indigo-400/50 hover:bg-white/10"
+            onClick={() => {
+              saveMutation.mutate({
+                name: state.slides[0]?.title || 'Untitled Deck',
+                deck_type: state.deckType || 'sales_9',
+                theme: 'minimalist',
+                aspect_ratio: '16:9',
+                slides: state.slides,
+              })
+            }}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? 'Saving...' : 'Save to My Decks'}
+          </Button>
+          <Button variant="glow" onClick={() => navigate('/export')}>Export to PPTX</Button>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
