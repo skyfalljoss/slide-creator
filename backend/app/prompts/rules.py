@@ -44,7 +44,7 @@ SCHEMA_BLOCK = """JSON schema:
       "title": "Slide title",
       "kicker": "Short uppercase eyebrow label (2-4 words)",
       "subtitle": "Short supporting line for title and section_divider slides",
-      "bullets": ["Bullet"],
+      "bullets": ["Bullet with evidence and data"],
       "notes": "Speaker notes",
       "layout": "title",
       "variant": "cover",
@@ -52,7 +52,9 @@ SCHEMA_BLOCK = """JSON schema:
       "image_prompt": "Photorealistic or abstract scene description, no text or diagrams",
       "image_query": "3-6 keyword phrase for stock photo search",
       "blocks": [{"type": "cards", "columns": 3, "items": [{"title": "Point", "body": "Detail"}]}],
-      "chart_recommendation": null
+      "chart_recommendation": null,
+      "callout": "Key takeaway sentence for content slides, null otherwise",
+      "narrative_context": "Optional 2-4 sentence background for presenter (null for simple slides)"
     }
   ]
 }"""
@@ -61,13 +63,24 @@ TITLE_QUALITY_RULES = """TITLES: Each title must state a specific, concrete take
   ❌ "Process Improvement"
   ✓ "Automation unlocks faster reporting with stronger controls" """
 
-BULLET_QUALITY_RULES = """BULLETS: Each bullet 1-2 sentences — specific enough to stand alone as a meaningful insight, short enough to scan in seconds. Ban generic phrases like "improve efficiency", "enhance performance". Each bullet must include a concrete number, percentage, dollar figure, or timeframe.
+BULLET_QUALITY_RULES = """BULLETS: Each bullet 2-4 sentences with supporting evidence, concrete examples, and data points. Each bullet must be a complete, self-contained insight the presenter could read aloud. Ban generic filler like "improve efficiency" without quantification.
   ❌ "Improve efficiency"
-  ✓ "Reduce report generation time by 60% through automated compliance checks" """
+  ✓ "Reduce report generation time by 60% through automated compliance checks, saving 120 hours per quarter across the compliance team — equivalent to $48,000 in annual cost avoidance at blended fully-loaded rates."
+  A bullet about a market trend should cite timeframe, magnitude, and a concrete example. A bullet about a recommendation should state expected impact and reference supporting evidence. Use sub-bullet structure within a single bullet when appropriate (list examples, comparisons, or data points inline)."""
 
-NOTES_QUALITY_RULES = """NOTES: 2-4 sentences per slide explaining the context, data sources, and the key message the presenter should convey. Don't just rephrase the bullets."""
+NOTES_QUALITY_RULES = """NOTES: 5-10 sentences per slide. Structure your notes as:
+1. Context sentence — what led to this slide and how it fits in the overall narrative
+2. Key message — the single most important thing the audience should take away
+3. Data sources and methodology — 2-3 sentences explaining where the numbers come from, timeframes, methodology notes
+4. Anticipated audience questions — 1-2 likely questions with suggested responses
+5. Delivery guidance — pace, emphasis, tone cues for the presenter
+Do not just rephrase the bullets. The notes should prepare the presenter for the full discussion."""
 
 KICKER_QUALITY_RULES = """KICKERS: Vary the kicker across slides. Each slide gets a distinct 2-4 word angle. Don't repeat the same labels."""
+
+CALLOUT_QUALITY_RULES = """CALLOUT: For every content slide (layout: content), provide a `callout` field with one sentence that captures the single most important takeaway. This should work as a headline or pull-quote — the one thing the audience must remember. Set callout to null for title, section_divider, and thank-you slides."""
+
+NARRATIVE_CONTEXT_RULES = """NARRATIVE_CONTEXT (optional): For complex slides, provide a `narrative_context` field with 2-4 sentences of background context — market conditions, methodology notes, data provenance, strategic rationale. This is stored for presenter reference and does NOT appear on the slide. Set to null for simple slides where bullets and notes already convey full context."""
 
 AUDIENCE_TONES: dict[str, str] = {
     "corporate": "Audience: corporate executives. Use a polished, board-ready, professional tone.",
