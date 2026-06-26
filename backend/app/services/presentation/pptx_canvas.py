@@ -100,6 +100,44 @@ class PptxCanvas:
             add_markdown_paragraph(text_frame, f"\u2022 {bullet}", 18, BODY_FONT, self._map_color(self.theme.text))
         return text_box
 
+    def add_callout_box(
+        self,
+        slide,
+        text: str,
+        left: float,
+        top: float,
+        width: float,
+        height: float,
+    ) -> None:
+        """Rendered as an accent-bordered highlight box — the single key takeaway."""
+        box = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            self.ix(left),
+            self.iy(top),
+            self.ix(width),
+            self.iy(height),
+        )
+        box.fill.solid()
+        box.fill.fore_color.rgb = self._active_theme().accent_soft
+        box.line.color.rgb = self._active_theme().accent
+        box.line.width = Pt(1.5)
+        box.shadow.inherit = False
+        try:
+            box.adjustments[0] = 0.08
+        except (IndexError, TypeError, ValueError):
+            logger.debug("Failed to adjust callout corner radius", exc_info=True)
+
+        tf = box.text_frame
+        self.clear_text_frame(tf)
+        p = tf.paragraphs[0]
+        p.text = text
+        p.font.name = BODY_FONT
+        p.font.size = Pt(14)
+        p.font.italic = True
+        p.font.color.rgb = self._active_theme().text
+        p.font.bold = False
+        p.alignment = PP_ALIGN.LEFT
+
     def add_card(self, slide, x: float, y: float, w: float, h: float, border_color: RGBColor | None = None):
         """A surface-filled rounded rectangle with a hairline border."""
         card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, self.ix(x), self.iy(y), self.ix(w), self.iy(h))
