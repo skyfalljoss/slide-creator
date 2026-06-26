@@ -36,7 +36,13 @@ def get_storage_service() -> StorageService:
 @lru_cache
 def get_session_store() -> SessionStore:
     if settings.session_provider == "redis":
-        raise NotImplementedError("Redis session store — implemented in Phase 2")
+        client = httpx.Client(
+            base_url=settings.upstash_redis_rest_url,
+            headers={"Authorization": f"Bearer {settings.upstash_redis_rest_token}"},
+            timeout=5.0,
+        )
+        from app.services.platform.session import RedisSessionStore
+        return RedisSessionStore(client=client)
     return LocalSessionStore()
 
 

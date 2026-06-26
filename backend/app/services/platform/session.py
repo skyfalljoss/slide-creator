@@ -1,6 +1,9 @@
+import json
 import uuid
 import time
 from typing import Protocol, TypedDict
+
+import httpx
 
 from app.config import settings
 from app.models.schemas import SlideData
@@ -66,6 +69,74 @@ class LocalSessionStore:
         for sid in expired:
             del self._store[sid]
         return len(expired)
+
+
+class RedisSessionStore:
+    def __init__(self, client: httpx.Client, prefix: str = "sf:session:", ttl: int | None = None):
+        self._client = client
+        self._prefix = prefix
+        self._ttl = ttl or settings.session_ttl_minutes * 60
+
+    def _key(self, session_id: str) -> str:
+        return f"{self._prefix}{session_id}"
+
+    def create(self, slides: list[SlideData], deck_type: str, theme: str = "minimalist", aspect_ratio: str = "16:9") -> str:
+        session_id = str(uuid.uuid4())
+        data: SessionData = {
+            "slides": slides,
+            "created_at": time.time(),
+            "deck_type": deck_type,
+            "theme": theme,
+            "aspect_ratio": aspect_ratio,
+        }
+        raw = json.dumps(data, default=str)
+        self._client.post(f"/set/{self._key(session_id)}", content=raw)
+        return session_id
+
+    def get(self, session_id: str, ttl_seconds: int | None = None) -> SessionData | None:
+        resp = self._client.get(f"/get/{self._key(session_id)}")
+        payload = resp.json()
+        raw = payload.get("result")
+        if raw is None:
+            return None
+        data: dict = json.loads(raw)
+        created_at = data["created_at"]
+        ttl = self._ttl if ttl_seconds is None else ttl_seconds
+        if time.time() - created_at > ttl:
+            self._client.post(f"/del/{self._key(session_id)}")
+            return None
+        slides = [SlideData(**s) if isinstance(s, dict) else s for s in data["slides"]]
+        return SessionData(
+            slides=slides,
+            created_at=created_at,
+            deck_type=data["deck_type"],
+            theme=data.get("theme", "minimalist"),
+            aspect_ratio=data.get("aspect_ratio", "16:9"),
+        )
+
+    def update_slide(self, session_id: str, slide: SlideData, ttl_seconds: int | None = None) -> bool:
+        data = self.get(session_id, ttl_seconds=ttl_seconds)
+        if data is None:
+            return False
+        for i, s in enumerate(data["slides"]):
+            if s.index == slide.index:
+                data["slides"][i] = slide
+                raw = json.dumps(
+                    {
+                        "slides": [s.model_dump() for s in data["slides"]],
+                        "created_at": data["created_at"],
+                        "deck_type": data["deck_type"],
+                        "theme": data["theme"],
+                        "aspect_ratio": data["aspect_ratio"],
+                    },
+                    default=str,
+                )
+                self._client.post(f"/set/{self._key(session_id)}", content=raw)
+                return True
+        return False
+
+    def purge_expired(self, ttl_seconds: int | None = None) -> int:
+        return 0
 
 
 _default_store = LocalSessionStore()
