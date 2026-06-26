@@ -1,2 +1,3 @@
 allowBuilds:
+  canvas: true
   msw: true
