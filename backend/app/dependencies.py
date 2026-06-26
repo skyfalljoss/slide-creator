@@ -30,6 +30,9 @@ def get_dlp_service() -> DlpService:
 
 @lru_cache
 def get_storage_service() -> StorageService:
+    if settings.storage_provider == "gcs":
+        from app.services.platform.storage import GCSStorageBackend
+        return GCSStorageBackend()  # type: ignore[return-value]
     return StorageService()
 
 
