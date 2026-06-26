@@ -2,18 +2,33 @@ import base64
 import logging
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.config import settings
 
 MOCK_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 logger = logging.getLogger(__name__)
 
+
 class CloudflareImageService:
-    def __init__(self):
+    def __init__(self, client: httpx.AsyncClient | None = None):
+        self._client = client
         self.url = settings.cloudflare_image_worker_url
         self.api_key = settings.cloudflare_image_worker_api_key
         self.model = settings.cloudflare_image_worker_model or "@cf/black-forest-labs/flux-1-schnell"
 
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            from app.dependencies import get_http_client
+            self._client = get_http_client()
+        return self._client
+
+    @retry(
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=1, max=5),
+        reraise=False,
+    )
     async def generate_image(self, prompt: str) -> str | None:
         # Image generation is handled by the Cloudflare worker and is independent
         # of AI_PROVIDER (which only selects the text/content generator, e.g. Gemini).
@@ -37,19 +52,19 @@ class CloudflareImageService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(api_url, json=payload, headers=headers)
-                if resp.status_code != 200:
-                    logger.warning(
-                        "Cloudflare Image Worker returned %s: %s",
-                        resp.status_code,
-                        resp.text[:300],
-                    )
-                    return None
-                b64 = self._extract_b64(resp.json())
-                if b64 is None:
-                    logger.warning("Cloudflare Image Worker response had no recognizable image field")
-                return b64
+            client = self._get_client()
+            resp = await client.post(api_url, json=payload, headers=headers, timeout=60.0)
+            if resp.status_code != 200:
+                logger.warning(
+                    "Cloudflare Image Worker returned %s: %s",
+                    resp.status_code,
+                    resp.text[:300],
+                )
+                return None
+            b64 = self._extract_b64(resp.json())
+            if b64 is None:
+                logger.warning("Cloudflare Image Worker response had no recognizable image field")
+            return b64
         except Exception:
             # Fall back gracefully in case of connection errors or API issues
             logger.warning("Cloudflare Image Worker failed", exc_info=True)
@@ -90,34 +105,48 @@ class StockPhotoService:
 
     SEARCH_URL = "https://api.pexels.com/v1/search"
 
-    def __init__(self):
+    def __init__(self, client: httpx.AsyncClient | None = None):
+        self._client = client
         self.api_key = settings.stock_photos_api_key
         self.provider = settings.stock_photos_provider
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            from app.dependencies import get_http_client
+            self._client = get_http_client()
+        return self._client
 
     @property
     def enabled(self) -> bool:
         return bool(self.api_key)
 
+    @retry(
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=1, max=5),
+        reraise=False,
+    )
     async def search_image(self, query: str) -> str | None:
         if not self.api_key or not query.strip():
             return None
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(
-                    self.SEARCH_URL,
-                    params={"query": query, "per_page": 1, "orientation": "landscape"},
-                    headers={"Authorization": self.api_key},
-                )
-                if resp.status_code != 200:
-                    logger.warning("Stock photo provider returned %s: %s", resp.status_code, resp.text[:200])
-                    return None
-                img_url = self._extract_image_url(resp.json())
-                if not img_url:
-                    return None
-                img_resp = await client.get(img_url)
-                if img_resp.status_code != 200:
-                    return None
-                return base64.b64encode(img_resp.content).decode("ascii")
+            client = self._get_client()
+            resp = await client.get(
+                self.SEARCH_URL,
+                params={"query": query, "per_page": 1, "orientation": "landscape"},
+                headers={"Authorization": self.api_key},
+                timeout=30.0,
+            )
+            if resp.status_code != 200:
+                logger.warning("Stock photo provider returned %s: %s", resp.status_code, resp.text[:200])
+                return None
+            img_url = self._extract_image_url(resp.json())
+            if not img_url:
+                return None
+            img_resp = await client.get(img_url, timeout=30.0)
+            if img_resp.status_code != 200:
+                return None
+            return base64.b64encode(img_resp.content).decode("ascii")
         except Exception:
             logger.warning("Stock photo lookup failed", exc_info=True)
             return None

@@ -78,9 +78,8 @@ async def test_generate_image_uses_cloudflare_even_when_ai_provider_local(monkey
     monkeypatch.setattr(mod.settings, "ai_provider", "local")
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_url", "https://worker.example/")
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_api_key", "test-key")
-    monkeypatch.setattr(mod.httpx, "AsyncClient", _FakeAsyncClient)
 
-    svc = mod.CloudflareImageService()
+    svc = mod.CloudflareImageService(client=_FakeAsyncClient())
     assert await svc.generate_image("a clean abstract background") == "REAL_IMAGE_B64"
 
 
@@ -99,8 +98,9 @@ async def test_generate_image_logs_worker_non_200(monkeypatch, caplog):
     monkeypatch.setattr(mod.settings, "cloudflare_image_worker_api_key", "test-key")
     monkeypatch.setattr(mod.httpx, "AsyncClient", _ErrorClient)
 
+    svc = mod.CloudflareImageService(client=_ErrorClient())
     with caplog.at_level(logging.WARNING, logger="app.services.media.image_service"):
-        result = await mod.CloudflareImageService().generate_image("prompt")
+        result = await svc.generate_image("prompt")
 
     assert result is None
     assert "Cloudflare Image Worker returned 503" in caplog.text
@@ -151,8 +151,7 @@ async def test_stock_returns_base64_when_configured(monkeypatch):
     from app.services.media import image_service as mod
 
     monkeypatch.setattr(mod.settings, "stock_photos_api_key", "test-key")
-    monkeypatch.setattr(mod.httpx, "AsyncClient", _FakeStockClient)
-    svc = mod.StockPhotoService()
+    svc = mod.StockPhotoService(client=_FakeStockClient())
     assert svc.enabled is True
     out = await svc.search_image("banking")
     assert out == base64.b64encode(b"JPEGBYTES").decode("ascii")
@@ -171,9 +170,9 @@ async def test_stock_logs_provider_non_200(monkeypatch, caplog):
 
     monkeypatch.setattr(mod.settings, "stock_photos_api_key", "test-key")
     monkeypatch.setattr(mod.httpx, "AsyncClient", _RateLimitedStockClient)
-
+    svc = mod.StockPhotoService(client=_RateLimitedStockClient())
     with caplog.at_level(logging.WARNING, logger="app.services.media.image_service"):
-        result = await mod.StockPhotoService().search_image("banking")
+        result = await svc.search_image("banking")
 
     assert result is None
     assert "Stock photo provider returned 429" in caplog.text
@@ -187,8 +186,8 @@ async def test_stock_returns_none_on_no_photos(monkeypatch):
             return _FakePexelsResponse({"photos": []})
 
     monkeypatch.setattr(mod.settings, "stock_photos_api_key", "test-key")
-    monkeypatch.setattr(mod.httpx, "AsyncClient", _NoPhotos)
-    assert await mod.StockPhotoService().search_image("banking") is None
+    svc = mod.StockPhotoService(client=_NoPhotos())
+    assert await svc.search_image("banking") is None
 
 
 async def test_resolve_slide_image_prefers_stock_then_falls_back_to_ai(monkeypatch):

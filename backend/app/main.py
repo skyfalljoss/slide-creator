@@ -52,6 +52,8 @@ async def lifespan(app: FastAPI):
     _validate_config()
     purge_local_temp_files()
     yield
+    from app.dependencies import get_http_client
+    await get_http_client().aclose()
 
 
 app = FastAPI(

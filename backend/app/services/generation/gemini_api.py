@@ -1,9 +1,11 @@
-import asyncio
 import json
 import logging
 import re
 from typing import Any
-from urllib import error, parse, request
+from urllib.parse import quote
+
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from pydantic import ValidationError
 
@@ -97,11 +99,18 @@ class GeminiResponseError(RuntimeError):
 
 
 class GeminiApiService:
-    def __init__(self, api_key: str | None = None, model: str | None = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None, http_client: httpx.AsyncClient | None = None):
         self.api_key = settings.gemini_api_key if api_key is None else api_key
         if not self.api_key:
             raise GeminiConfigurationError("GEMINI_API_KEY is required when AI_PROVIDER=gemini")
         self.model = model or settings.gemini_model
+        self._client = http_client
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            from app.dependencies import get_http_client
+            self._client = get_http_client()
+        return self._client
 
     async def generate(self, req: GenerateRequest, chart_data: dict | None = None, upload_summary: dict | None = None) -> list[SlideData]:
         del chart_data
@@ -275,7 +284,43 @@ Preserve or intentionally update framework fields so the slide remains renderabl
         return json.dumps(data, ensure_ascii=True)
 
     async def _generate_json(self, prompt: str) -> str:
-        return await asyncio.to_thread(self._post_generate_content, prompt)
+        return await self._post_generate_content(prompt)
+
+    @retry(
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, max=10),
+        reraise=True,
+    )
+    async def _post_generate_content(self, prompt: str) -> str:
+        encoded_model = quote(self.model, safe="")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{encoded_model}:generateContent?key={quote(self.api_key)}"
+        body = self.to_json(
+            {
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.35,
+                    "responseMimeType": "application/json",
+                    "maxOutputTokens": 16384,
+                },
+            }
+        )
+        try:
+            resp = await self._get_client().post(
+                url,
+                content=body,
+                headers={"Content-Type": "application/json"},
+                timeout=60.0,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, ValueError) as exc:
+            raise GeminiResponseError("Gemini API request failed") from exc
+
+        try:
+            return payload["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise GeminiResponseError("Gemini API response did not include JSON text") from exc
 
     async def _generate_with_retries(
         self,
@@ -325,36 +370,6 @@ Bad response excerpt:
 Original request:
 {original_prompt}
 """.strip()
-
-    def _post_generate_content(self, prompt: str) -> str:
-        encoded_model = parse.quote(self.model, safe="")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{encoded_model}:generateContent?key={parse.quote(self.api_key)}"
-        body = self.to_json(
-            {
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.35,
-                    "responseMimeType": "application/json",
-                    "maxOutputTokens": 16384,
-                },
-            }
-        ).encode("utf-8")
-        req = request.Request(
-            url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with request.urlopen(req, timeout=60) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise GeminiResponseError("Gemini API request failed") from exc
-
-        try:
-            return payload["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise GeminiResponseError("Gemini API response did not include JSON text") from exc
 
     def _strip_json_fence(self, text: str) -> str:
         stripped = text.strip()

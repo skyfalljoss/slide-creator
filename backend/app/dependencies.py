@@ -1,5 +1,7 @@
 from functools import lru_cache
 
+import httpx
+
 from app.config import settings
 from app.services.platform.audit import AuditService
 from app.services.platform.dlp import DlpService
@@ -36,6 +38,11 @@ def get_session_store() -> SessionStore:
     if settings.session_provider == "redis":
         raise NotImplementedError("Redis session store — implemented in Phase 2")
     return LocalSessionStore()
+
+
+@lru_cache
+def get_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
 
 
 def get_audit_service() -> AuditService:
