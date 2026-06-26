@@ -123,6 +123,8 @@ class SlideData(BaseModel):
     image_b64: str | None = None
     image_prompt: str | None = None
     image_query: str | None = None
+    callout: str | None = None
+    narrative_context: str | None = None
     content: SlideContent | None = None
     enrichment: SlideEnrichment | None = None
     assets: SlideAssets | None = None
