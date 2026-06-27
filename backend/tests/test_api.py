@@ -613,7 +613,12 @@ async def test_export_rejects_invalid_pptx_before_upload(
             uploaded.append(content)
             return "http://test/api/v1/download/bad.pptx"
 
+    def reject_pptx(content: bytes, max_bytes: int) -> None:
+        del content, max_bytes
+        raise export_router.InvalidPptxError("PPTX failed validation")
+
     monkeypatch.setattr(export_router, "PptxEngine", BadEngine)
+    monkeypatch.setattr(export_router, "validate_pptx", reject_pptx)
     _patch_storage(monkeypatch, RecordingStorage())
 
     resp = await client.post(

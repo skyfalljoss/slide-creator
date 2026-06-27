@@ -46,7 +46,13 @@ def _normalize_prefix(prefix: str) -> str:
 
 
 class LocalDeckFileStorage:
-    """Immutable deck file storage rooted in a confined local directory."""
+    """Immutable storage below a trusted local root.
+
+    The root and its parent filesystem are an administrative trust boundary.
+    Symlink checks prevent ordinary escapes, but can still race with hostile,
+    concurrent filesystem mutation because portable Python lacks openat-style
+    path traversal controls.
+    """
 
     def __init__(self, root: Path):
         self.root = Path(root).resolve()
@@ -66,34 +72,43 @@ class LocalDeckFileStorage:
         return path
 
     async def put(self, key: str, content: bytes) -> None:
-        path = self._path_for(key)
+        normalized = _normalize_key(key)
 
         def write() -> None:
+            path = self._path_for(normalized)
             path.parent.mkdir(parents=True, exist_ok=True)
-            self._path_for(key)
+            self._path_for(normalized)
             with path.open("xb") as output:
                 output.write(content)
 
         await asyncio.to_thread(write)
 
     async def read(self, key: str) -> bytes:
-        path = self._path_for(key)
-        return await asyncio.to_thread(path.read_bytes)
+        normalized = _normalize_key(key)
+
+        def read_bytes() -> bytes:
+            return self._path_for(normalized).read_bytes()
+
+        return await asyncio.to_thread(read_bytes)
 
     async def delete(self, key: str) -> None:
-        path = self._path_for(key)
+        normalized = _normalize_key(key)
 
         def unlink() -> None:
             try:
-                path.unlink()
+                self._path_for(normalized).unlink()
             except FileNotFoundError:
                 pass
 
         await asyncio.to_thread(unlink)
 
     async def exists(self, key: str) -> bool:
-        path = self._path_for(key)
-        return await asyncio.to_thread(path.is_file)
+        normalized = _normalize_key(key)
+
+        def is_file() -> bool:
+            return self._path_for(normalized).is_file()
+
+        return await asyncio.to_thread(is_file)
 
     async def list_keys(self, prefix: str) -> list[str]:
         normalized_prefix = _normalize_prefix(prefix)
@@ -145,7 +160,10 @@ class GCSDeckFileStorage:
 
     async def read(self, key: str) -> bytes:
         blob = self._bucket().blob(_normalize_key(key))
-        return await asyncio.to_thread(blob.download_as_bytes)
+        try:
+            return await asyncio.to_thread(blob.download_as_bytes)
+        except NotFound as exc:
+            raise FileNotFoundError(key) from exc
 
     async def delete(self, key: str) -> None:
         blob = self._bucket().blob(_normalize_key(key))

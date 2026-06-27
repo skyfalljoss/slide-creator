@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -76,6 +77,21 @@ async def test_local_storage_rejects_key_through_symlink(tmp_path: Path):
         await storage.put("linked/version.pptx", b"content")
 
 
+@pytest.mark.asyncio
+async def test_local_filesystem_inspection_runs_off_event_loop(tmp_path: Path, monkeypatch):
+    storage = LocalDeckFileStorage(tmp_path)
+    event_loop_thread = threading.get_ident()
+    original_path_for = storage._path_for
+
+    def checked_path_for(key: str):
+        assert threading.get_ident() != event_loop_thread
+        return original_path_for(key)
+
+    monkeypatch.setattr(storage, "_path_for", checked_path_for)
+
+    assert await storage.exists("decks/missing.pptx") is False
+
+
 @pytest.fixture
 def gcs_storage():
     client = MagicMock()
@@ -132,6 +148,15 @@ async def test_gcs_read_exists_and_list(gcs_storage):
     assert await storage.exists("decks/d1.pptx") is True
     assert await storage.list_keys("decks/") == ["decks/d1.pptx", "decks/d2.pptx"]
     bucket.list_blobs.assert_called_once_with(prefix="decks/")
+
+
+@pytest.mark.asyncio
+async def test_gcs_read_translates_not_found(gcs_storage):
+    storage, bucket = gcs_storage
+    bucket.blob.return_value.download_as_bytes.side_effect = NotFound("missing")
+
+    with pytest.raises(FileNotFoundError):
+        await storage.read("decks/missing.pptx")
 
 
 @pytest.mark.asyncio
