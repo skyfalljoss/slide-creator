@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings
 
+from app.errors import ConfigurationError
+
 
 class Settings(BaseSettings):
     gcp_project_id: str = "slideforge-dev"
@@ -19,6 +21,14 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = 30
     signed_url_expiry_minutes: int = 30
     deck_db_path: str = ".data/decks.db"
+    database_url: str = "sqlite+aiosqlite:///.data/deck_versions.db"
+    onlyoffice_enabled: bool = False
+    onlyoffice_public_url: str = "http://localhost:8080"
+    onlyoffice_internal_url: str = "http://onlyoffice"
+    onlyoffice_jwt_secret: str = ""
+    onlyoffice_file_token_ttl_seconds: int = 300
+    onlyoffice_max_file_bytes: int = 50_000_000
+    deck_version_retention: int = 5
     max_prompt_length: int = 5000
     citi_sso_enabled: bool = False
     allowed_origins: list[str] = ["http://localhost:5173"]
@@ -46,3 +56,18 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_settings(configured: Settings) -> None:
+    if configured.ai_provider == "gemini" and not configured.gemini_api_key:
+        raise ConfigurationError("GEMINI_API_KEY is required when AI_PROVIDER=gemini")
+    if configured.session_provider == "redis" and (
+        not configured.upstash_redis_rest_url or not configured.upstash_redis_rest_token
+    ):
+        raise ConfigurationError(
+            "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required when SESSION_PROVIDER=redis"
+        )
+    if configured.storage_provider == "gcs" and not configured.gcs_bucket:
+        raise ConfigurationError("GCS_BUCKET is required when STORAGE_PROVIDER=gcs")
+    if configured.onlyoffice_enabled and not configured.onlyoffice_jwt_secret:
+        raise ConfigurationError("ONLYOFFICE_JWT_SECRET is required when ONLYOFFICE_ENABLED=true")
