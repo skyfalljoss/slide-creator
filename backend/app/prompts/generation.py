@@ -15,7 +15,7 @@ Content quality rules:
 {title_quality_rules}
 {kicker_quality_rules}
 {bullet_quality_rules}
-Use 3-12 bullets per slide — let the topic's depth determine the count. A simple point may need 3; a complex argument may need 10-12.
+Use 3-5 bullets per slide. Prefer fewer, sharper points over long paragraphs.
 {notes_quality_rules}
 {callout_quality_rules}
 {narrative_context_rules}

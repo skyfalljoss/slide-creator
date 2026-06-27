@@ -51,6 +51,22 @@ async def test_health(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("origin", ["http://127.0.0.1:5173", "http://localhost:5174"])
+async def test_cors_preflight_allows_local_frontend_hosts(client: AsyncClient, origin: str):
+    resp = await client.options(
+        "/api/v1/generate",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == origin
+
+
+@pytest.mark.asyncio
 async def test_generate_sales(client: AsyncClient):
     resp = await client.post(
         "/api/v1/generate",
@@ -59,7 +75,9 @@ async def test_generate_sales(client: AsyncClient):
     assert resp.status_code == 200
     data = resp.json()
     assert "session_id" in data
-    assert len(data["slides"]) == 9
+    assert len(data["slides"]) == 10
+    assert data["slides"][1]["title"] == "Presentation Agenda"
+    assert all(slide["chapter_number"] for slide in data["slides"][2:-1])
     assert data["slides"][-1]["title"] == "Thank You"
 
 
@@ -71,7 +89,9 @@ async def test_generate_internal(client: AsyncClient):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data["slides"]) == 6
+    assert len(data["slides"]) == 7
+    assert data["slides"][1]["title"] == "Presentation Agenda"
+    assert all(slide["chapter_number"] for slide in data["slides"][2:-1])
 
 
 @pytest.mark.asyncio
@@ -212,11 +232,11 @@ async def test_generate_resolves_images_for_framework_visual_variants(
     )
 
     assert resp.status_code == 200
-    assert resolved == [1, 2, 3, 5, 6]
+    assert resolved == [1, 3, 4, 6, 7]
     slides = resp.json()["slides"]
-    assert slides[1]["image_b64"] == "IMG64"
     assert slides[2]["image_b64"] == "IMG64"
-    assert slides[3]["image_b64"] is None
+    assert slides[3]["image_b64"] == "IMG64"
+    assert slides[4]["image_b64"] is None
 
 
 @pytest.mark.asyncio
@@ -282,7 +302,7 @@ async def test_generate_accepts_ai_chart_recommendation_from_uploaded_columns(
         )
 
         assert resp.status_code == 200
-        chart_slide = resp.json()["slides"][1]
+        chart_slide = next(slide for slide in resp.json()["slides"] if slide["title"] == "Revenue Trend")
         assert chart_slide["chart_data"]["type"] == "line"
         assert chart_slide["chart_data"]["categories"] == ["Q1", "Q2"]
         assert chart_slide["chart_data"]["series"] == [{"name": "Revenue", "values": [100.0, 125.0]}]
@@ -331,7 +351,7 @@ async def test_generate_rejects_ai_chart_recommendation_for_missing_uploaded_col
         )
 
         assert resp.status_code == 200
-        chart_slide = resp.json()["slides"][1]
+        chart_slide = next(slide for slide in resp.json()["slides"] if slide["title"] == "Bookings Trend")
         assert chart_slide["chart_data"] is None
         assert chart_slide["chart_audit"]["recommendation_status"] == "rejected"
         assert "missing" in chart_slide["chart_audit"]["rejection_reason"].lower()
@@ -633,7 +653,7 @@ async def test_export_audit_slide_count_matches_rendered_pptx(
     download = await client.get(export.json()["download_url"].replace("http://test", ""))
     prs = Presentation(BytesIO(download.content))
 
-    assert len(prs.slides) == 3
+    assert len(prs.slides) == 4
     assert audit.get_events()[-1].slide_count == len(prs.slides)
 
 
@@ -692,9 +712,12 @@ async def test_generate_script_mode_chunks_source(client: AsyncClient):
     )
     assert resp.status_code == 200
     slides = resp.json()["slides"]
-    # Content-derived count plus a normalized final thank-you slide.
-    assert len(slides) == 4
+    # Content-derived count plus an outline slide and a normalized final thank-you slide.
+    assert len(slides) == 5
     assert slides[0]["layout"] == "title"
+    assert slides[1]["title"] == "Presentation Agenda"
+    chapterable = [slide for slide in slides[2:-1] if slide["variant"] != "closing"]
+    assert all(slide["chapter_number"] for slide in chapterable)
     # Original source text preserved in notes.
     assert "regional market is expanding" in slides[0]["notes"]
     # Bullet cap enforced everywhere.

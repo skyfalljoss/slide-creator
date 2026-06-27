@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { exportDeck, generate, refine, uploadFile } from './api'
+import { exportDeck, generate, getDeckSlidePreview, refine, uploadFile } from './api'
 
 describe('api client', () => {
   const fetchMock = vi.fn()
@@ -54,5 +54,18 @@ describe('api client', () => {
     })
 
     await expect(generate({ prompt: 'risk-free pitch', deck_type: 'sales_9' })).rejects.toThrow('Prompt contains prohibited terms: risk-free')
+  })
+
+  it('fetches deck slide previews', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ deck_id: 'deck-1', slide_index: 2, image_b64: 'UE5H', width: 1920, height: 1080, updated_at: 'now' }),
+    })
+
+    const result = await getDeckSlidePreview('deck-1', 2)
+
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/v1/decks/deck-1/preview?slide_index=2')
+    expect(result.image_b64).toBe('UE5H')
+    expect(result.width).toBe(1920)
   })
 })

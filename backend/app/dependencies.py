@@ -10,6 +10,7 @@ from app.services.platform.storage import StorageService
 from app.services.generation.gemini import GeminiService
 from app.services.generation.gemini_api import GeminiApiService
 from app.services.platform.deck_store import DeckStore
+from app.services.presentation.pptx_preview import PptxPreviewService
 
 
 _audit_service = AuditService()
@@ -67,3 +68,8 @@ def get_deck_store() -> DeckStore:
     if _deck_store is None:
         _deck_store = DeckStore(settings.deck_db_path)
     return _deck_store
+
+
+@lru_cache
+def get_preview_service() -> PptxPreviewService:
+    return PptxPreviewService()

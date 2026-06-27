@@ -10,7 +10,7 @@ from app.config import settings
 from app.errors import ConfigurationError
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.rate_limit import register_rate_limiter
-from app.routers import decks, generate, health, refine, export, uploads, v2
+from app.routers import decks, generate, health, refine, export, preview, uploads, v2
 from app.services.platform.storage import StorageService
 from app.services.platform.uploads import UploadService
 
@@ -71,6 +71,7 @@ register_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
+    allow_origin_regex=settings.allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,6 +94,7 @@ app.include_router(export.router, prefix="/api/v1", tags=["export"])
 app.include_router(uploads.router, prefix="/api/v1", tags=["uploads"])
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(decks.router, prefix="/api/v1", tags=["decks"])
+app.include_router(preview.router, prefix="/api/v1", tags=["preview"])
 
 def purge_local_temp_files() -> dict[str, int]:
     return {

@@ -4,10 +4,11 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DeckProvider } from '@/state/DeckContext'
 import { CreatePage } from './CreatePage'
-import { generate, uploadFile } from '@/lib/api'
+import { generate, saveDeck, uploadFile } from '@/lib/api'
 
 vi.mock('@/lib/api', () => ({
   generate: vi.fn(),
+  saveDeck: vi.fn(),
   uploadFile: vi.fn(),
 }))
 
@@ -33,6 +34,7 @@ function renderCreatePage() {
 describe('CreatePage', () => {
   beforeEach(() => {
     vi.mocked(generate).mockReset()
+    vi.mocked(saveDeck).mockReset()
     vi.mocked(uploadFile).mockReset()
     navigate.mockReset()
     sessionStorage.clear()
@@ -54,6 +56,7 @@ describe('CreatePage', () => {
       session_id: 'session-1',
       slides: [{ index: 1, title: 'Title', bullets: [], notes: '', layout: 'title', chart_data: null }],
     })
+    vi.mocked(saveDeck).mockResolvedValue({ id: 'deck-1', name: 'Title', created_at: '2026-06-26T00:00:00Z' })
     renderCreatePage()
 
     fireEvent.change(screen.getByLabelText(/describe your presentation/i), { target: { value: 'Pitch for Acme' } })
@@ -62,6 +65,13 @@ describe('CreatePage', () => {
 
     await waitFor(() => expect(uploadFile).toHaveBeenCalled())
     expect(vi.mocked(generate).mock.calls[0]?.[0]).toEqual({ prompt: 'Pitch for Acme', deck_type: 'sales_9', source_type: 'brief', target_audience: 'corporate', theme: 'minimalist', aspect_ratio: '16:9', file_id: 'file-1.csv' })
+    expect(vi.mocked(saveDeck).mock.calls[0]?.[0]).toEqual({
+      name: 'Title',
+      deck_type: 'sales_9',
+      theme: 'minimalist',
+      aspect_ratio: '16:9',
+      slides: [{ index: 1, title: 'Title', bullets: [], notes: '', layout: 'title', chart_data: null }],
+    })
     expect(navigate).toHaveBeenCalledWith('/preview')
   })
 

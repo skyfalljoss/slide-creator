@@ -10,9 +10,11 @@ __pycache__/
 *.egg-info/
 .venv/
 .superpowers/
+.data/
 *.potx
 *.pptx
 !backend/app/templates/*.potx
-!backend/app/templates/*.pptx
+!backend/app/templates/Citi PPTW Format - Sample Investment Banking Presentation.pptx
+!backend/app/templates/SlideForge-Presentation.pptx
 .DS_Store
 *.log

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     max_prompt_length: int = 5000
     citi_sso_enabled: bool = False
     allowed_origins: list[str] = ["http://localhost:5173"]
+    allowed_origin_regex: str | None = r"^http://(?:localhost|127\.0\.0\.1)(?::\d+)?$"
     risk_disclosure: str = "Confidential. This material is for discussion purposes only and is not a guarantee of future results."
     citi_logo_path: str | None = "app/templates/citi_logo.png"
     sample_template_path: str = "app/templates/Citi PPTW Format - Sample Investment Banking Presentation.pptx"

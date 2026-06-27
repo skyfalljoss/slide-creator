@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
 from pptx.presentation import Presentation as PresentationType
 from pptx.slide import Slide, SlideLayout
@@ -136,6 +137,26 @@ class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
         fill = slide.background.fill
         fill.solid()
         fill.fore_color.rgb = background
+        self._add_background_depth(slide)
+
+    def _add_background_depth(self, slide: Slide) -> None:
+        theme = self._active_theme()
+        if self._active_dark:
+            panels = [
+                (13.25, 0, 4.53, self._canvas_h, theme.panel_bg),
+                (0, 8.95, self._LOGICAL_WIDTH, 1.05, RGBColor(0x0B, 0x16, 0x26)),
+            ]
+        else:
+            panels = [
+                (0, 0, self._LOGICAL_WIDTH, 1.1, theme.panel_bg),
+                (0, 8.85, self._LOGICAL_WIDTH, 1.15, RGBColor(0xF1, 0xF5, 0xF9)),
+            ]
+        for x, y, w, h, color in panels:
+            panel = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, self._ix(x), self._iy(y), self._ix(w), self._iy(h))
+            panel.fill.solid()
+            panel.fill.fore_color.rgb = color
+            panel.line.fill.background()
+            panel.shadow.inherit = False
 
     def _blank_layout(self, prs: PresentationType) -> SlideLayout:
         return prs.slide_layouts[6] if len(prs.slide_layouts) > 6 else prs.slide_layouts[0]
@@ -147,6 +168,11 @@ class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
         return prs.slide_layouts[0]
 
     def _apply_content_slide(self, slide: Slide, data: SlideData) -> None:
+        self._current_slide_data = data
+        self._apply_content_body(slide, data)
+        self._add_chapter_marker(slide, data)
+
+    def _apply_content_body(self, slide: Slide, data: SlideData) -> None:
         layout = data.layout.lower()
         variant = self._variant_for(data)
         layout_handlers = self._content_layout_handlers()
@@ -256,7 +282,18 @@ class PptxEngine(PptxLayoutMixin, PptxChartMixin, PptxBlockMixin):
 
     def _add_eyebrow(self, slide: Slide, x: float, y: float, text: str, width: float = 12.0) -> None:
         """Small uppercase accent-colored label (the template's red kicker)."""
-        self._add_text(slide, x, y, width, 0.4, text.upper(), 15, self._active_theme().accent, bold=True)
+        label = text.upper()
+        pill_w = min(max(1.45, len(label) * 0.105 + 0.55), width)
+        pill = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, self._ix(x), self._iy(y - 0.05), self._ix(pill_w), self._iy(0.42))
+        pill.fill.solid()
+        pill.fill.fore_color.rgb = self._active_theme().accent_soft
+        pill.line.color.rgb = self._active_theme().accent
+        pill.shadow.inherit = False
+        try:
+            pill.adjustments[0] = 0.35
+        except (IndexError, TypeError, ValueError):
+            pass
+        self._add_text(slide, x + 0.18, y + 0.03, max(pill_w - 0.36, 0.5), 0.24, label, 12, self._active_theme().accent, bold=True)
 
     def _add_card_text(self, slide: Slide, x: float, y: float, w: float, h: float, text: str, size: int, color: RGBColor):
         """Markdown-aware text that stays within a fixed box (no autosize growth)."""

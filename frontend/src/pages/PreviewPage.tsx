@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
-import { refine, saveDeck } from '@/lib/api'
+import { refine, saveDeck, updateDeck } from '@/lib/api'
 import { useDeck } from '@/state/deck'
 import { SlideBlocks } from '@/components/SlideBlocks'
 
@@ -11,14 +11,33 @@ const REFINE_OPTIONS = ['Shorter', 'More formal', 'Add data', 'Simplify']
 
 export function PreviewPage() {
   const navigate = useNavigate()
-  const { state, updateSlide } = useDeck()
+  const queryClient = useQueryClient()
+  const { state, updateSlide, markDeckSaved } = useDeck()
   const [selectedSlide, setSelectedSlide] = useState(0)
   const [designOpen, setDesignOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const refineMutation = useMutation({ mutationFn: refine })
   const saveMutation = useMutation({
-    mutationFn: saveDeck,
-    onSuccess: () => navigate('/my-decks'),
+    mutationFn: async () => {
+      const payload = {
+        name: state.slides[0]?.title || 'Untitled Deck',
+        deck_type: state.deckType || 'sales_9',
+        theme: 'minimalist',
+        aspect_ratio: '16:9',
+        slides: state.slides,
+      }
+      if (state.savedDeckId) {
+        await updateDeck(state.savedDeckId, { name: payload.name, slides: payload.slides })
+        return { id: state.savedDeckId, name: payload.name, created_at: '' }
+      }
+      const saved = await saveDeck(payload)
+      markDeckSaved(saved.id)
+      return saved
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['decks'] })
+      navigate('/my-decks')
+    },
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save deck'),
   })
 
@@ -55,17 +74,11 @@ export function PreviewPage() {
             variant="outline"
             className="border-white/15 bg-white/5 text-slate-200 hover:border-indigo-400/50 hover:bg-white/10"
             onClick={() => {
-              saveMutation.mutate({
-                name: state.slides[0]?.title || 'Untitled Deck',
-                deck_type: state.deckType || 'sales_9',
-                theme: 'minimalist',
-                aspect_ratio: '16:9',
-                slides: state.slides,
-              })
+              saveMutation.mutate()
             }}
             disabled={saveMutation.isPending}
           >
-            {saveMutation.isPending ? 'Saving...' : 'Save to My Decks'}
+            {saveMutation.isPending ? 'Saving...' : state.savedDeckId ? 'Update in My Decks' : 'Save to My Decks'}
           </Button>
           <Button variant="glow" onClick={() => navigate('/export')}>Export to PPTX</Button>
         </div>

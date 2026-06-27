@@ -11,6 +11,7 @@ vi.mock('@/lib/api', () => ({ exportDeck: vi.fn() }))
 
 const storedDeck = {
   sessionId: 'session-1',
+  savedDeckId: null,
   deckType: 'sales_9',
   uploadedFile: null,
   lastExport: null,

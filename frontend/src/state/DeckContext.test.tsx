@@ -76,8 +76,9 @@ describe('DeckProvider', () => {
   })
 
   it('hydrates from sessionStorage', () => {
-    const stored = {
+  const stored = {
       sessionId: 'stored-session',
+      savedDeckId: 'deck-1',
       deckType: 'internal_6',
       slides: [{ ...slide, title: 'Stored Slide' }],
       uploadedFile: null,

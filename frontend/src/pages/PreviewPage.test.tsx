@@ -4,15 +4,17 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DeckProvider } from '@/state/DeckContext'
 import { PreviewPage } from './PreviewPage'
-import { refine, saveDeck } from '@/lib/api'
+import { refine, saveDeck, updateDeck } from '@/lib/api'
+import type { DeckState } from '@/types'
 
-vi.mock('@/lib/api', () => ({ refine: vi.fn(), saveDeck: vi.fn() }))
+vi.mock('@/lib/api', () => ({ refine: vi.fn(), saveDeck: vi.fn(), updateDeck: vi.fn() }))
 
 const storedDeck = {
   sessionId: 'session-1',
   deckType: 'sales_9',
   uploadedFile: null,
   lastExport: null,
+  savedDeckId: 'deck-1',
   slides: [
     {
       index: 1,
@@ -63,10 +65,32 @@ function renderPreview(initialPath = '/preview') {
   )
 }
 
+function renderPreviewWithDeckRoute(initialPath = '/preview') {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <DeckProvider>
+        <MemoryRouter initialEntries={[initialPath]}>
+          <Routes>
+            <Route path="/preview" element={<PreviewPage />} />
+            <Route path="/my-decks" element={<div>My Decks route</div>} />
+            <Route path="/create" element={<div>Create route</div>} />
+          </Routes>
+        </MemoryRouter>
+      </DeckProvider>
+    </QueryClientProvider>,
+  )
+
+  return { ...view, invalidateSpy }
+}
+
 describe('PreviewPage', () => {
   beforeEach(() => {
     vi.mocked(refine).mockReset()
     vi.mocked(saveDeck).mockReset()
+    vi.mocked(updateDeck).mockReset()
     sessionStorage.clear()
   })
 
@@ -108,5 +132,17 @@ describe('PreviewPage', () => {
     await waitFor(() => expect(refine).toHaveBeenCalled())
     expect(vi.mocked(refine).mock.calls[0]?.[0]).toEqual({ session_id: 'session-1', slide_index: 1, instruction: 'Shorter' })
     await waitFor(() => expect(screen.getAllByText(/Refined Summary/i).length).toBeGreaterThan(0))
+  })
+
+  it('invalidates deck listings before navigating to my decks after save', async () => {
+    sessionStorage.setItem('slideforge.deck', JSON.stringify(storedDeck))
+    vi.mocked(updateDeck).mockResolvedValue({ updated_at: '2026-06-26T00:00:00Z' })
+
+    const { invalidateSpy } = renderPreviewWithDeckRoute()
+    fireEvent.click(screen.getByRole('button', { name: /update in my decks/i }))
+
+    await waitFor(() => expect(updateDeck).toHaveBeenCalledWith('deck-1', { name: 'Executive Summary', slides: storedDeck.slides }))
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['decks'] }))
+    await waitFor(() => expect(screen.getByText('My Decks route')).toBeInTheDocument())
   })
 })

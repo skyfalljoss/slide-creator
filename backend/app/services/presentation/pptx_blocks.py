@@ -140,8 +140,11 @@ class PptxBlockMixin:
             else:
                 title, body = split_label_body(it)
                 steps.append((title if body else "", body or title))
-        steps = steps[:4]
+        steps = steps[:5]
         if not steps:
+            return
+        if len(steps) > 4:
+            self._block_agenda_grid(slide, steps, x, y, w, h)
             return
         cols = len(steps)
         gap = LAYOUT.content_gap
@@ -157,6 +160,22 @@ class PptxBlockMixin:
                 self._add_text(slide, cx + pad, ty, cw - 2 * pad, 0.45, title, 20, self.theme.text, bold=True)
                 ty += 0.55
             self._add_card_text(slide, cx + pad, ty, cw - 2 * pad, max(y + ch - ty - 0.2, 0.4), body, 16, self.theme.muted)
+
+    def _block_agenda_grid(self, slide: Slide, steps: list[tuple[str, str]], x: float, y: float, w: float, h: float) -> None:
+        cols = 2
+        rows = (len(steps) + cols - 1) // cols
+        gap = LAYOUT.content_gap
+        cw = (w - gap) / cols
+        ch = min((h - gap * (rows - 1)) / rows, 1.75)
+        pad = 0.28
+        for i, (title, body) in enumerate(steps):
+            row, col = divmod(i, cols)
+            cx = x + col * (cw + gap)
+            cy = y + row * (ch + gap)
+            self._add_card(slide, cx, cy, cw, ch)
+            self._add_number_circle(slide, cx + pad, cy + pad, i + 1, size=0.52)
+            text = title if not body else f"{title} {body}"
+            self._add_card_text(slide, cx + 0.98, cy + pad + 0.02, cw - 1.25, ch - 0.42, text, 15, self.theme.text)
 
     def _block_table(self, slide: Slide, block: dict, x: float, y: float, w: float, h: float) -> None:
         headers = [clean_inline_text(c) for c in (block.get("headers") or [])]

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect } from 'vitest'
 import { createEmptySlide, slideToCanvasObjects, canvasObjectsToSlide } from './canvas-bridge'
 import type { SlideData } from '@/types'
@@ -29,14 +28,14 @@ describe('slideToCanvasObjects', () => {
   it('creates title textbox', () => {
     const slide: SlideData = { index: 1, title: 'Hello', bullets: [], notes: '', layout: 'content', chart_data: null }
     const objects = slideToCanvasObjects(slide, 960, 540, '#056DAE')
-    const title = objects.find((o: any) => o.type === 'text' && o.text === 'Hello')
+    const title = objects.find((o) => o.type === 'text' && o.text === 'Hello')
     expect(title).toBeDefined()
   })
 
   it('creates bullet textboxes with prefix', () => {
-    const slide: SlideData = { index: 1, title: 'X', bullets: ['Point A', 'Point B'], notes: '', layout: 'content', chart_data: null }
+    const slide: SlideData = { index: 2, title: 'X', bullets: ['Point A', 'Point B'], notes: '', layout: 'content', chart_data: null }
     const objects = slideToCanvasObjects(slide, 960, 540, '#056DAE')
-    const bullets = objects.filter((o: any) => o.type === 'text' && o.text && o.text.startsWith('• '))
+    const bullets = objects.filter((o) => o.type === 'text' && o.text && o.text.startsWith('• '))
     expect(bullets).toHaveLength(2)
     expect(bullets[0].text).toBe('• Point A')
     expect(bullets[1].text).toBe('• Point B')
@@ -45,8 +44,54 @@ describe('slideToCanvasObjects', () => {
   it('creates kicker textbox when present', () => {
     const slide: SlideData = { index: 1, title: 'X', kicker: 'SECTION A', bullets: [], notes: '', layout: 'content', chart_data: null }
     const objects = slideToCanvasObjects(slide, 960, 540, '#056DAE')
-    const kicker = objects.find((o: any) => o.type === 'text' && o.text === 'SECTION A')
+    const kicker = objects.find((o) => o.type === 'text' && o.text === 'SECTION A')
     expect(kicker).toBeDefined()
+  })
+
+  it('uses PPTX title-slide geometry for cover slides', () => {
+    const slide: SlideData = {
+      index: 1,
+      title: 'AI Slide Creator: Revolutionizing Presentation Development',
+      kicker: 'INNOVATE. AUTOMATE. PRESENT.',
+      bullets: [],
+      notes: '',
+      layout: 'title',
+      chart_data: null,
+    }
+    const objects = slideToCanvasObjects(slide, 960, 540)
+
+    const title = objects.find((o) => o.role === 'title')
+    const coverPanel = objects.find((o) => o.role === 'cover-panel')
+    const accentBar = objects.find((o) => o.role === 'accent-bar')
+
+    expect(title).toBeDefined()
+    expect(title?.left).toBeCloseTo(45, 0)
+    expect(title?.top).toBeCloseTo(186, 0)
+    expect(title?.width).toBeCloseTo(481, 0)
+    expect(title?.fontSize).toBe(36)
+    expect(coverPanel?.left).toBeGreaterThan(540)
+    expect(coverPanel?.height).toBeGreaterThan(430)
+    expect(accentBar?.top).toBeGreaterThan(Number(title?.top))
+  })
+
+  it('preserves title-slide geometry when overriding the background color', () => {
+    const slide: SlideData = {
+      index: 1,
+      title: 'AI Slide Creator: Revolutionizing Presentation Development',
+      kicker: 'INNOVATE. AUTOMATE. PRESENT.',
+      bullets: [],
+      notes: '',
+      layout: 'title',
+      chart_data: null,
+    }
+    const objects = slideToCanvasObjects(slide, 960, 540, '#056DAE')
+
+    const background = objects.find((o) => o.role === 'background')
+    const title = objects.find((o) => o.role === 'title')
+
+    expect(background?.fill).toBe('#056DAE')
+    expect(title?.top).toBeCloseTo(186, 0)
+    expect(title?.fontSize).toBe(36)
   })
 })
 

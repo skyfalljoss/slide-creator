@@ -1,31 +1,36 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import * as fabric from 'fabric'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
-import { getDeck, updateDeck, exportDeckById } from '@/lib/api'
-import { slideToCanvasObjects, canvasObjectsToSlide, createEmptySlide } from '@/lib/canvas-bridge'
+import { getDeck, getDeckSlidePreview, updateDeck, exportDeckById } from '@/lib/api'
+import { createEmptySlide } from '@/lib/canvas-bridge'
 import type { SlideData } from '@/types'
 
 export function EditorPage() {
   const { deckId } = useParams<{ deckId: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const fabricRef = useRef<fabric.Canvas | null>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [deckName, setDeckName] = useState('')
   const [deckNameInitialized, setDeckNameInitialized] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isDirty, setIsDirty] = useState(false)
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState(100)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: deck, isLoading } = useQuery({
     queryKey: ['deck', deckId],
     queryFn: () => getDeck(deckId!),
     enabled: !!deckId,
+  })
+
+  const { data: preview, isLoading: isPreviewLoading, error: previewError } = useQuery({
+    queryKey: ['deck-preview', deckId, selectedIndex + 1],
+    queryFn: () => getDeckSlidePreview(deckId!, selectedIndex + 1),
+    enabled: !!deckId && !!deck,
+    retry: false,
   })
 
   if (deck && !deckNameInitialized) {
@@ -36,7 +41,10 @@ export function EditorPage() {
   const saveMutation = useMutation({
     mutationFn: (data: { slides: SlideData[]; name?: string }) =>
       updateDeck(deckId!, { slides: data.slides, name: data.name }),
-    onSuccess: () => setIsDirty(false),
+    onSuccess: () => {
+      setIsDirty(false)
+      void queryClient.invalidateQueries({ queryKey: ['deck-preview', deckId] })
+    },
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
   })
 
@@ -54,91 +62,28 @@ export function EditorPage() {
     }, 3000)
   }, [saveMutation])
 
-  const renderSlide = useCallback((canvas: fabric.Canvas, slide: SlideData) => {
-    canvas.clear()
-    const objects = slideToCanvasObjects(slide, 960, 540, '#1E293B')
-
-    for (const obj of objects) {
-      if (obj.type === 'rect') {
-        const rect = new fabric.Rect({
-          left: obj.left || 0,
-          top: obj.top || 0,
-          width: obj.width || 960,
-          height: obj.height || 540,
-          fill: obj.fill || '#1E293B',
-          selectable: obj.selectable !== false,
-          evented: obj.evented !== false,
-        })
-        canvas.add(rect)
-      } else if (obj.type === 'text') {
-        const textbox = new fabric.Textbox(obj.text || '', {
-          left: obj.left || 0,
-          top: obj.top || 0,
-          fontSize: obj.fontSize || 16,
-          fontFamily: obj.fontFamily || 'Inter',
-          fontWeight: Array.isArray(obj.fontWeight) ? obj.fontWeight[0] : obj.fontWeight || 'normal',
-          fill: obj.fill || '#FFFFFF',
-          width: (obj.width || 840) as number,
-          editable: true,
-        })
-        canvas.add(textbox)
-      }
-    }
-    canvas.renderAll()
-  }, [])
-
   useEffect(() => {
-    if (!canvasRef.current || !deck) return
-
-    if (fabricRef.current) {
-      fabricRef.current.dispose()
-    }
-
-    const canvas = new fabric.Canvas(canvasRef.current, {
-      width: 960,
-      height: 540,
-      backgroundColor: '#0F172A',
-      selection: true,
-    })
-
-    fabricRef.current = canvas
-
-    canvas.on('object:modified', () => {
-      const slides = deck.slides
-      const currentSlide = slides[selectedIndex]
-      if (!currentSlide) return
-      const objects = canvas.getObjects().map((o) => o.toJSON())
-      const updated = canvasObjectsToSlide(objects, currentSlide)
-      const newSlides = [...slides]
-      newSlides[selectedIndex] = updated
-      persistSlides(newSlides)
-    })
-
-    if (deck.slides[selectedIndex]) {
-      renderSlide(canvas, deck.slides[selectedIndex])
-    }
-
-    const resizeCanvas = () => {
-      if (!canvasRef.current?.parentElement) return
-      const parent = canvasRef.current.parentElement
+    const resizePreview = () => {
+      const parent = stageRef.current
+      if (!parent) return
+      if (parent.clientWidth === 0 || parent.clientHeight === 0) {
+        setZoom(100)
+        return
+      }
       const scale = Math.min(
+        1,
         (parent.clientWidth - 40) / 960,
         (parent.clientHeight - 40) / 540,
       )
-      canvas.setZoom(scale)
-      canvas.setWidth(960 * scale)
-      canvas.setHeight(540 * scale)
       setZoom(Math.round(scale * 100))
     }
-    resizeCanvas()
-    window.addEventListener('resize', resizeCanvas)
+    resizePreview()
+    window.addEventListener('resize', resizePreview)
 
     return () => {
-      window.removeEventListener('resize', resizeCanvas)
-      canvas.dispose()
-      fabricRef.current = null
+      window.removeEventListener('resize', resizePreview)
     }
-  }, [deck, selectedIndex, renderSlide, persistSlides])
+  }, [])
 
   if (!deckId) return <div className="text-white p-8">No deck ID provided</div>
 
@@ -158,14 +103,18 @@ export function EditorPage() {
   const slides = deck.slides
   const currentSlide = slides[selectedIndex] || slides[0]
 
-  const handleSelectSlide = (index: number) => {
-    if (fabricRef.current) {
-      const objects = fabricRef.current.getObjects().map((o) => o.toJSON())
-      const updated = canvasObjectsToSlide(objects, slides[selectedIndex])
-      const newSlides = [...slides]
-      newSlides[selectedIndex] = updated
-      persistSlides(newSlides)
+  const flushPendingSave = async (slidesToSave: SlideData[], name?: string) => {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current)
+      autoSaveTimer.current = null
     }
+    if (isDirty || name !== undefined) {
+      await saveMutation.mutateAsync({ slides: slidesToSave, name })
+    }
+  }
+
+  const handleSelectSlide = (index: number) => {
+    void flushPendingSave(slides)
     setSelectedIndex(index)
   }
 
@@ -191,10 +140,27 @@ export function EditorPage() {
     }
   }
 
+  const handleExport = async () => {
+    try {
+      await flushPendingSave(slides, deckName !== deck.name ? deckName : undefined)
+      exportMutation.mutate()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save before export')
+    }
+  }
+
   const setSlidesAndSchedule = (newSlides: SlideData[]) => {
     queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
     persistSlides(newSlides)
   }
+
+  const previewWidth = preview ? preview.width / 2 : 960
+  const previewHeight = preview ? preview.height / 2 : 540
+  const previewStyle = {
+    width: `${previewWidth * (zoom / 100)}px`,
+    height: `${previewHeight * (zoom / 100)}px`,
+  }
+  const previewMessage = previewError instanceof Error ? previewError.message : null
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] -mx-4 sm:-mx-6 lg:-mx-8 -mb-6">
@@ -214,7 +180,7 @@ export function EditorPage() {
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" className="border-white/15 bg-white/5 text-slate-200" onClick={handleSaveName}>Save</Button>
-          <Button size="sm" variant="glow" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+          <Button size="sm" variant="glow" onClick={handleExport} disabled={exportMutation.isPending || saveMutation.isPending}>
             {exportMutation.isPending ? 'Exporting...' : 'Export PPTX'}
           </Button>
         </div>
@@ -248,28 +214,39 @@ export function EditorPage() {
           </div>
         </div>
 
-        <div className="flex-1 bg-slate-700 flex items-center justify-center relative overflow-hidden">
+        <div ref={stageRef} className="flex-1 bg-slate-700 flex items-center justify-center relative overflow-hidden">
           <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-slate-800 rounded-lg px-2 py-1 z-10">
             <button onClick={() => {
-              const c = fabricRef.current
-              if (c) {
-                const newZoom = (c.getZoom() || 1) * 0.8
-                c.setZoom(newZoom)
-                setZoom(Math.round(newZoom * 100))
-              }
+              setZoom((current) => Math.max(10, Math.round(current * 0.8)))
             }} className="text-white text-xs px-1">−</button>
             <span className="text-white text-xs px-1">{zoom}%</span>
             <button onClick={() => {
-              const c = fabricRef.current
-              if (c) {
-                const newZoom = (c.getZoom() || 1) * 1.25
-                c.setZoom(newZoom)
-                setZoom(Math.round(newZoom * 100))
-              }
+              setZoom((current) => Math.min(200, Math.round(current * 1.25)))
             }} className="text-white text-xs px-1">+</button>
           </div>
-          <div className="shadow-2xl">
-            <canvas ref={canvasRef} />
+          <div className="shadow-2xl bg-slate-900">
+            {isPreviewLoading && (
+              <div className="grid place-items-center bg-slate-900 text-sm text-slate-300" style={previewStyle}>
+                Rendering PPTX preview...
+              </div>
+            )}
+            {previewMessage && (
+              <div className="grid place-items-center bg-slate-900 p-6 text-center text-sm text-amber-200" style={previewStyle}>
+                <div>
+                  <div className="font-semibold">Preview renderer unavailable</div>
+                  <div className="mt-2 text-xs text-amber-100/80">{previewMessage}</div>
+                </div>
+              </div>
+            )}
+            {preview && !previewMessage && (
+              <img
+                alt={`Slide ${selectedIndex + 1} preview`}
+                src={`data:image/png;base64,${preview.image_b64}`}
+                className="block max-w-none select-none"
+                draggable={false}
+                style={previewStyle}
+              />
+            )}
           </div>
         </div>
 
@@ -281,7 +258,9 @@ export function EditorPage() {
               <div>
                 <label className="text-[10px] text-slate-500 block mb-1">Title</label>
                 <input
+                  id="slide-title"
                   type="text"
+                  aria-label="Title"
                   value={currentSlide.title}
                   onChange={(e) => {
                     const newSlides = slides.map((s, i) =>

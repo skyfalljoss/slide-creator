@@ -6,6 +6,7 @@ import type {
   ListDecksResponse, DeckDetail,
   SaveDeckRequest, SaveDeckResponse,
   UpdateDeckRequest, UpdateDeckResponse,
+  SlidePreviewResponse,
 } from '@/types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
@@ -73,6 +74,10 @@ export function listDecks(params?: { q?: string; deck_type?: string; sort?: stri
 
 export function getDeck(deckId: string): Promise<DeckDetail> {
   return getRequest(`/decks/${deckId}`)
+}
+
+export function getDeckSlidePreview(deckId: string, slideIndex: number): Promise<SlidePreviewResponse> {
+  return getRequest(`/decks/${deckId}/preview`, { slide_index: String(slideIndex) })
 }
 
 export function saveDeck(data: SaveDeckRequest): Promise<SaveDeckResponse> {

@@ -5,6 +5,7 @@ export const STORAGE_KEY = 'slideforge.deck'
 
 export const initialState: DeckState = {
   sessionId: null,
+  savedDeckId: null,
   deckType: null,
   slides: [],
   uploadedFile: null,
@@ -13,6 +14,7 @@ export const initialState: DeckState = {
 
 export interface SetGeneratedDeckInput {
   sessionId: string
+  savedDeckId?: string | null
   deckType: DeckType
   slides: SlideData[]
   uploadedFile: UploadResponse | null
@@ -21,6 +23,7 @@ export interface SetGeneratedDeckInput {
 export interface DeckContextValue {
   state: DeckState
   setGeneratedDeck: (deck: SetGeneratedDeckInput) => void
+  markDeckSaved: (deckId: string) => void
   updateSlide: (slide: SlideData) => void
   setExportResult: (result: ExportResponse) => void
   clearDeck: () => void

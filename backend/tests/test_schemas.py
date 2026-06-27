@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.models.schemas import ChartAudit, ChartRecommendation, SlideData
+from app.models.schemas import ChartAudit, ChartRecommendation, SlideContent, SlideData
 
 
 def test_slide_data_accepts_chart_data_and_preserves_json_shape():
@@ -77,3 +77,78 @@ def test_slide_data_metadata_defaults_are_none():
     assert slide.visual_direction is None
     assert slide.chart_recommendation is None
     assert slide.chart_audit is None
+
+
+def test_slide_data_accepts_content_chapter_metadata():
+    slide = SlideData(
+        index=3,
+        title="Market Opportunity",
+        bullets=[],
+        notes="",
+        layout="content",
+        chapter_number=1,
+        chapter_title="Market Opportunity",
+    )
+
+    assert slide.chapter_number == 1
+    assert slide.chapter_title == "Market Opportunity"
+
+
+def test_slide_data_rejects_chapter_number_outside_agenda_range():
+    with pytest.raises(ValidationError):
+        SlideData(
+            index=3,
+            title="Market Opportunity",
+            bullets=[],
+            notes="",
+            layout="content",
+            chapter_number=5,
+        )
+
+
+def test_slide_data_rejects_chapter_number_below_agenda_range():
+    with pytest.raises(ValidationError):
+        SlideData(
+            index=3,
+            title="Market Opportunity",
+            bullets=[],
+            notes="",
+            layout="content",
+            chapter_number=0,
+        )
+
+
+def test_slide_data_rejects_chapter_title_over_80_characters():
+    with pytest.raises(ValidationError):
+        SlideData(
+            index=3,
+            title="Market Opportunity",
+            bullets=[],
+            notes="",
+            layout="content",
+            chapter_title="x" * 81,
+        )
+
+
+def test_slide_content_rejects_chapter_number_outside_agenda_range():
+    with pytest.raises(ValidationError):
+        SlideContent(
+            index=3,
+            title="Market Opportunity",
+            bullets=[],
+            notes="",
+            layout="content",
+            chapter_number=0,
+        )
+
+
+def test_slide_content_rejects_chapter_title_over_80_characters():
+    with pytest.raises(ValidationError):
+        SlideContent(
+            index=3,
+            title="Market Opportunity",
+            bullets=[],
+            notes="",
+            layout="content",
+            chapter_title="x" * 81,
+        )

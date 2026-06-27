@@ -18,6 +18,8 @@ VARIANT_RULES = """Framework variant rules:
 - Use presentation-framework.html as the visual reference for native editable PPTX structure.
 - Set variant to one of: cover, big_statement, three_points, split_image, big_stat, before_after, comparison_table, process, quote, closing.
 - Use cover for the first title slide.
+- Add exactly one overview slide immediately after the cover titled "Presentation Agenda", using process variant with 3-4 chapters. Each chapter needs a 2-5 word title and an 8-14 word description. Do not create another agenda, outline, overview, roadmap, or discussion slide.
+- Set chapter_number (1-4) and chapter_title on every content slide except the agenda and final closing slide. Related slides must repeat the same chapter metadata.
 - Use closing for a separate final slide titled "Thank You"; put concrete next steps on the preceding process/next_steps slide when the deck length allows.
 - Create visual rhythm by alternating light slides with darker emphasis slides; big_statement, big_stat, quote, and closing are best for dark-background treatment.
 - Use split_image when a narrative slide benefits from a strong right-side visual.
@@ -44,6 +46,8 @@ SCHEMA_BLOCK = """JSON schema:
       "title": "Slide title",
       "kicker": "Short uppercase eyebrow label (2-4 words)",
       "subtitle": "Short supporting line for title and section_divider slides",
+      "chapter_number": null,
+      "chapter_title": null,
       "bullets": ["Bullet with evidence and data"],
       "notes": "Speaker notes",
       "layout": "title",
@@ -63,10 +67,10 @@ TITLE_QUALITY_RULES = """TITLES: Each title must state a specific, concrete take
   ❌ "Process Improvement"
   ✓ "Automation unlocks faster reporting with stronger controls" """
 
-BULLET_QUALITY_RULES = """BULLETS: Each bullet 2-4 sentences with supporting evidence, concrete examples, and data points. Each bullet must be a complete, self-contained insight the presenter could read aloud. Ban generic filler like "improve efficiency" without quantification.
+BULLET_QUALITY_RULES = """BULLETS: Keep slide bullets concise: one sentence per bullet, generally 14-24 words, with evidence or a concrete action where useful. Ban generic filler like "improve efficiency" without quantification.
   ❌ "Improve efficiency"
   ✓ "Reduce report generation time by 60% through automated compliance checks, saving 120 hours per quarter across the compliance team — equivalent to $48,000 in annual cost avoidance at blended fully-loaded rates."
-  A bullet about a market trend should cite timeframe, magnitude, and a concrete example. A bullet about a recommendation should state expected impact and reference supporting evidence. Use sub-bullet structure within a single bullet when appropriate (list examples, comparisons, or data points inline)."""
+  A bullet about a market trend should cite timeframe, magnitude, and a concrete example. A bullet about a recommendation should state expected impact and reference supporting evidence. Avoid multi-clause paragraphs and long inline lists."""
 
 NOTES_QUALITY_RULES = """NOTES: 5-10 sentences per slide. Structure your notes as:
 1. Context sentence — what led to this slide and how it fits in the overall narrative

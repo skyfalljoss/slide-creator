@@ -17,7 +17,7 @@ from app.services.presentation.pptx_text import (
     icon_shape,
     looks_like_instruction as _looks_like_instruction,
 )
-from app.services.presentation.pptx_theme import CITI_DARK, THEMES, WHITE, resolve_theme
+from app.services.presentation.pptx_theme import CITI_DARK, CITI_RED, THEMES, WHITE, resolve_theme
 
 
 def test_render_sales_deck():
@@ -200,6 +200,97 @@ def test_render_adds_citi_header_and_final_disclaimer_text():
     assert "citi" in first_slide_text.lower()
     assert "Confidential" not in final_slide_text
     assert "not a guarantee" not in final_slide_text
+
+
+def test_big_stat_supporting_content_stays_below_metric_label():
+    slides = [
+        SlideData(index=1, title="Title", bullets=[], notes="", layout="title"),
+        SlideData(
+            index=2,
+            title="Total Funding Required",
+            bullets=[
+                "**Sales & Marketing Expansion (35% / $3.5M):** Build enterprise sales, launch targeted digital campaigns, and expand strategic partnerships.",
+                "**Operational Scale & Infrastructure (15% / $1.5M):** Scale cloud infrastructure, security protocols, and customer support.",
+                "**Working Capital & Contingency (10% / $1.0M):** Maintain operating flexibility and a contingency buffer.",
+            ],
+            notes="",
+            layout="content",
+            variant="big_stat",
+            blocks=[{"type": "stat", "value": "$10M", "label": "Total Funding Required"}],
+        ),
+    ]
+
+    prs = Presentation(BytesIO(PptxEngine().render(slides)))
+    shapes = prs.slides[1].shapes
+    label_shapes = [shape for shape in shapes if hasattr(shape, "text") and shape.text == "Total Funding Required"]
+    bullet_shapes = [shape for shape in shapes if hasattr(shape, "text") and "Sales & Marketing" in shape.text]
+
+    assert label_shapes
+    assert bullet_shapes
+    label = min(label_shapes, key=lambda shape: shape.top)
+    bullets = bullet_shapes[0]
+    assert bullets.top >= label.top + label.height
+
+
+def test_big_stat_supporting_cards_keep_body_text_right_of_icon_chip():
+    slides = [
+        SlideData(index=1, title="Title", bullets=[], notes="", layout="title"),
+        SlideData(
+            index=2,
+            title="Total Funding Required",
+            bullets=[
+                "Reduce average presentation creation time by 50-70%, freeing up 200-300 hours per month.",
+                "Achieve an estimated annual cost avoidance of $75,000-$120,000 by reducing reliance on agencies.",
+                "Enhance brand consistency across all external communications and client trust.",
+            ],
+            notes="",
+            layout="content",
+            variant="big_stat",
+            blocks=[{"type": "stat", "value": "60%", "label": "Average reduction in presentation creation time"}],
+        ),
+    ]
+
+    prs = Presentation(BytesIO(PptxEngine().render(slides)))
+    shapes = prs.slides[1].shapes
+    card = next(
+        shape
+        for shape in shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and getattr(shape, "auto_shape_type", None) == MSO_SHAPE.ROUNDED_RECTANGLE
+        and shape.top >= Inches(5)
+        and shape.width >= Inches(4)
+    )
+    body = next(shape for shape in shapes if shape.has_text_frame and "Reduce average presentation creation time" in shape.text)
+
+    assert body.left >= card.left + Inches(0.9)
+
+
+def test_closing_layout_keeps_title_rule_and_bullets_tightly_grouped():
+    slides = [
+        SlideData(index=1, title="Title", bullets=[], notes="", layout="title"),
+        SlideData(
+            index=2,
+            title="Next Steps & Call to Action",
+            kicker="PARTNER WITH US",
+            bullets=[
+                "**Schedule a Deep-Dive Demonstration:** Personalized platform walkthrough tied to portfolio priorities.",
+                "**Review Detailed Financial Projections:** Share financial models, spend breakdowns, and sensitivity analysis.",
+                "**Initiate Term Sheet Discussions:** Align on investment terms and move into formal documentation.",
+            ],
+            notes="",
+            layout="content",
+            variant="closing",
+        ),
+    ]
+
+    prs = Presentation(BytesIO(PptxEngine().render(slides)))
+    shapes = prs.slides[1].shapes
+    title = next(shape for shape in shapes if hasattr(shape, "text") and shape.text == "Next Steps & Call to Action")
+    bullets = next(shape for shape in shapes if hasattr(shape, "text") and "Schedule a Deep-Dive" in shape.text)
+
+    assert title.top < Inches(2.4)
+    assert bullets.top < Inches(4.8)
+    assert bullets.top - (title.top + title.height) < Inches(1.2)
 
 
 def test_render_adds_disclosure_to_last_rendered_slide_with_non_sequential_indexes():
@@ -1079,6 +1170,691 @@ def test_framework_process_and_quote_variants_render_distinct_structures():
 
     assert "Audit" in process_text and "Migrate" in process_text
     assert "Build the future" in quote_text and "JANE DOE" in quote_text
+
+
+def test_process_variant_with_five_long_steps_uses_bounded_agenda_cards():
+    long_steps = [
+        "Explore the expanding market opportunity for AI-driven short video content.",
+        "Introduce the platform's innovative solution and core technological advantages.",
+        "Review the business model and early indicators of market traction.",
+        "Detail the strategic allocation of the $10 million investment to accelerate growth.",
+        "Outline financial projections and the path to investor returns.",
+    ]
+    slides = [
+        SlideData(index=1, title="Cover", bullets=[], notes="", layout="title"),
+        SlideData(
+            index=2,
+            title="Strategic Roadmap for Growth",
+            kicker="PRESENTATION OVERVIEW",
+            subtitle="Key discussion points for today's investment review",
+            bullets=long_steps,
+            notes="",
+            layout="content",
+            variant="process",
+        ),
+    ]
+
+    prs = Presentation(BytesIO(PptxEngine().render(slides)))
+    slide = prs.slides[1]
+    text = " ".join(_texts(slide))
+    numbers = [shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() in {"1", "2", "3", "4", "5"}]
+
+    assert len(numbers) == 5
+    assert "•" not in text
+    assert "Outline financial projections" in text
+
+
+def _presentation_agenda_slides(
+    *,
+    steps: list[dict[str, str]] | None = None,
+    bullets: list[str] | None = None,
+) -> list[SlideData]:
+    agenda_steps = steps if steps is not None else [
+        {"title": "The Core Insight", "body": "Understanding the shift in modern infrastructure."},
+        {"title": "Strategic Pillars", "body": "The foundations supporting sustainable growth."},
+        {"title": "Execution Pipeline", "body": "Deployment phases and readiness."},
+        {"title": "Impact & Outlook", "body": "Metrics and next fiscal-year outlook."},
+    ]
+    return [
+        SlideData(index=1, title="Cover", bullets=[], notes="", layout="title"),
+        SlideData(
+            index=2,
+            title="Presentation Agenda",
+            bullets=bullets or [],
+            notes="",
+            layout="content",
+            variant="process",
+            blocks=[{"type": "process", "steps": agenda_steps}],
+        ),
+    ]
+
+
+def _containing_card(slide, text_shape):
+    cards = [
+        shape
+        for shape in slide.shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and shape.auto_shape_type == MSO_SHAPE.ROUNDED_RECTANGLE
+        and shape.left <= text_shape.left
+        and shape.top <= text_shape.top
+        and shape.left + shape.width >= text_shape.left + text_shape.width
+        and shape.top + shape.height >= text_shape.top + text_shape.height
+    ]
+    return min(cards, key=lambda shape: shape.width * shape.height, default=None)
+
+
+def _relative_luminance(color) -> float:
+    channels = []
+    for value in color:
+        channel = value / 255
+        channels.append(channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def _contrast_ratio(foreground, background) -> float:
+    lighter, darker = sorted((_relative_luminance(foreground), _relative_luminance(background)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def test_presentation_agenda_renders_large_title_and_card_numbers():
+    prs = Presentation(BytesIO(PptxEngine().render(_presentation_agenda_slides())))
+    slide = prs.slides[1]
+    title = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == "Presentation Agenda")
+    numbers = [shape.text.strip() for shape in slide.shapes if shape.has_text_frame and shape.text.strip() in {"01", "02", "03", "04"}]
+
+    assert title.text_frame.paragraphs[0].font.size == Pt(54)
+    assert numbers == ["01", "02", "03", "04"]
+
+
+@pytest.mark.parametrize("aspect_ratio", ["16:9", "4:3"])
+def test_presentation_agenda_long_title_and_body_boxes_stay_inside_cards(aspect_ratio):
+    long_title = "Enterprise Data Governance, Regulatory Readiness, and Responsible AI Operating Model"
+    long_body = (
+        "Align ownership, controls, reporting, and executive decisions across regions while preserving "
+        "delivery speed, measurable accountability, and a clear path through implementation."
+    )
+    steps = [
+        {"title": f"{long_title} {index}", "body": f"{long_body} Phase {index}."}
+        for index in range(1, 5)
+    ]
+    prs = Presentation(
+        BytesIO(
+            PptxEngine(aspect_ratio=aspect_ratio).render(
+                _presentation_agenda_slides(steps=steps)
+            )
+        )
+    )
+    slide = prs.slides[1]
+    agenda_copy = {value for step in steps for value in step.values()}
+    text_shapes = [
+        shape
+        for shape in slide.shapes
+        if shape.has_text_frame and shape.text.strip() in agenda_copy
+    ]
+
+    assert len(text_shapes) == 8
+    assert all(_containing_card(slide, shape) is not None for shape in text_shapes)
+    assert all(shape.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE for shape in text_shapes)
+
+
+def test_presentation_agenda_title_and_body_frames_shrink_to_fit():
+    prs = Presentation(BytesIO(PptxEngine().render(_presentation_agenda_slides())))
+    slide = prs.slides[1]
+    agenda_copy = {
+        "The Core Insight",
+        "Understanding the shift in modern infrastructure.",
+        "Strategic Pillars",
+        "The foundations supporting sustainable growth.",
+        "Execution Pipeline",
+        "Deployment phases and readiness.",
+        "Impact & Outlook",
+        "Metrics and next fiscal-year outlook.",
+    }
+    text_shapes = [
+        shape
+        for shape in slide.shapes
+        if shape.has_text_frame and shape.text.strip() in agenda_copy
+    ]
+
+    assert len(text_shapes) == 8
+    assert all(shape.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE for shape in text_shapes)
+
+
+def test_presentation_agenda_never_uses_old_discussion_fallback_copy():
+    explicit = _presentation_agenda_slides(
+        steps=[{"title": "Core Insight", "body": "The context and core insight for the discussion."}],
+    )
+    fallback = _presentation_agenda_slides(steps=[])
+
+    direct_text = " ".join(_texts(Presentation(BytesIO(PptxEngine().render(explicit))).slides[1]))
+    fallback_text = " ".join(_texts(Presentation(BytesIO(PptxEngine().render(fallback))).slides[1]))
+
+    assert "The context and core insight for the discussion." not in direct_text
+    assert "The context and core insight for the discussion." not in fallback_text
+    assert "Key context, evidence, and decisions for this chapter." in fallback_text
+
+
+def test_presentation_agenda_skips_old_discussion_copy_when_used_as_title():
+    slides = _presentation_agenda_slides(
+        steps=[
+            {
+                "title": "The context and core insight for the discussion.",
+                "body": "This item must not be displayed.",
+            }
+        ]
+    )
+
+    text = " ".join(_texts(Presentation(BytesIO(PptxEngine().render(slides))).slides[1]))
+
+    assert "The context and core insight for the discussion." not in text
+    assert "This item must not be displayed." not in text
+    assert "The Core Insight" in text
+
+
+def test_presentation_agenda_deduplicates_titles_and_prioritizes_block_bodies():
+    block_steps = [
+        {"title": "Market Opportunity", "body": "Block market evidence."},
+        {"title": "Strategic Pillars", "body": "Block strategic priorities."},
+        {"title": "Execution Plan", "body": "Block execution milestones."},
+    ]
+    bullets = [
+        "market opportunity: Bullet market copy.",
+        "STRATEGIC PILLARS: Bullet strategy copy.",
+        "Execution Plan: Bullet execution copy.",
+    ]
+    slides = _presentation_agenda_slides(steps=block_steps, bullets=bullets)
+    slide = Presentation(BytesIO(PptxEngine().render(slides))).slides[1]
+    numbers = [
+        shape.text.strip()
+        for shape in slide.shapes
+        if shape.has_text_frame and shape.text.strip() in {"01", "02", "03", "04"}
+    ]
+    cards = [
+        shape
+        for shape in slide.shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and shape.auto_shape_type == MSO_SHAPE.ROUNDED_RECTANGLE
+    ]
+    text = " ".join(_texts(slide))
+
+    assert numbers == ["01", "02", "03"]
+    assert len(cards) == 3
+    assert all(step["body"] in text for step in block_steps)
+    assert "Bullet market copy." not in text
+    assert "Bullet strategy copy." not in text
+    assert "Bullet execution copy." not in text
+
+
+@pytest.mark.parametrize("aspect_ratio", ["16:9", "4:3"])
+@pytest.mark.parametrize("item_count", [1, 2, 3, 4])
+def test_presentation_agenda_item_counts_and_boxes_are_bounded(aspect_ratio, item_count):
+    steps = [
+        {"title": f"Chapter {index}", "body": f"Decision context for chapter {index}."}
+        for index in range(1, item_count + 1)
+    ]
+    engine = PptxEngine(aspect_ratio=aspect_ratio)
+    prs = Presentation(BytesIO(engine.render(_presentation_agenda_slides(steps=steps))))
+    slide = prs.slides[1]
+    numbers = {f"{index:02d}" for index in range(1, item_count + 1)}
+    agenda_copy = numbers | {value for step in steps for value in step.values()}
+    agenda_shapes = [
+        shape
+        for shape in slide.shapes
+        if shape.has_text_frame and shape.text.strip() in agenda_copy
+    ]
+    cards = [
+        shape
+        for shape in slide.shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and shape.auto_shape_type == MSO_SHAPE.ROUNDED_RECTANGLE
+    ]
+
+    assert len([shape for shape in agenda_shapes if shape.text.strip() in numbers]) == item_count
+    assert len(cards) == item_count
+    assert len(agenda_shapes) == item_count * 3
+    assert all(shape.left >= 0 and shape.top >= 0 for shape in cards + agenda_shapes)
+    assert all(shape.left + shape.width <= prs.slide_width for shape in cards + agenda_shapes)
+    assert all(shape.top + shape.height <= prs.slide_height for shape in cards + agenda_shapes)
+    assert all(_containing_card(slide, shape) is not None for shape in agenda_shapes)
+
+
+def test_presentation_agenda_four_card_grid_has_equal_two_by_two_geometry():
+    prs = Presentation(BytesIO(PptxEngine().render(_presentation_agenda_slides())))
+    cards = [
+        shape
+        for shape in prs.slides[1].shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and shape.auto_shape_type == MSO_SHAPE.ROUNDED_RECTANGLE
+    ]
+
+    assert len(cards) == 4
+    assert len({shape.width for shape in cards}) == 1
+    assert len({shape.height for shape in cards}) == 1
+    assert len({shape.left for shape in cards}) == 2
+    assert len({shape.top for shape in cards}) == 2
+    assert all(len([shape for shape in cards if shape.left == left]) == 2 for left in {shape.left for shape in cards})
+    assert all(len([shape for shape in cards if shape.top == top]) == 2 for top in {shape.top for shape in cards})
+
+
+def test_presentation_agenda_card_text_has_nonoverlapping_vertical_regions():
+    engine = PptxEngine()
+    prs = Presentation(BytesIO(engine.render(_presentation_agenda_slides())))
+    slide = prs.slides[1]
+    items = [
+        ("The Core Insight", "Understanding the shift in modern infrastructure."),
+        ("Strategic Pillars", "The foundations supporting sustainable growth."),
+        ("Execution Pipeline", "Deployment phases and readiness."),
+        ("Impact & Outlook", "Metrics and next fiscal-year outlook."),
+    ]
+
+    for index, (title, body) in enumerate(items, start=1):
+        number_shape = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == f"{index:02d}")
+        title_shape = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == title)
+        body_shape = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == body)
+
+        assert number_shape.top + number_shape.height <= title_shape.top
+        assert title_shape.top + title_shape.height <= body_shape.top
+        assert title_shape.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        assert body_shape.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+
+@pytest.mark.parametrize("theme_name", ["minimalist", "bold", "dark"])
+def test_presentation_agenda_numbers_use_active_accent_with_large_text_contrast(theme_name):
+    engine = PptxEngine(theme=theme_name)
+    prs = Presentation(BytesIO(engine.render(_presentation_agenda_slides())))
+    slide = prs.slides[1]
+    number_shapes = [
+        shape
+        for shape in slide.shapes
+        if shape.has_text_frame and shape.text.strip() in {"01", "02", "03", "04"}
+    ]
+    active_theme = engine._active_theme()
+    card = next(
+        shape
+        for shape in slide.shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and shape.auto_shape_type == MSO_SHAPE.ROUNDED_RECTANGLE
+    )
+    card_color = card.fill.fore_color.rgb
+
+    assert len(number_shapes) == 4
+    for shape in number_shapes:
+        number_color = shape.text_frame.paragraphs[0].font.color.rgb
+        assert number_color == active_theme.accent
+        assert _contrast_ratio(number_color, card_color) >= 3.0
+
+
+def test_presentation_agenda_uses_length_aware_title_and_body_fonts():
+    short_title = "Market"
+    long_title = "Enterprise Data Governance, Regulatory Readiness, and Responsible AI Operating Model"
+    concise_body = "Review market evidence and decisions."
+    long_body = (
+        "Align ownership, controls, reporting, and executive decisions across regions while preserving "
+        "delivery speed, measurable accountability, and a clear path through implementation."
+    )
+    steps = [
+        {"title": short_title, "body": concise_body},
+        {"title": long_title, "body": long_body},
+    ]
+    slide = Presentation(
+        BytesIO(PptxEngine().render(_presentation_agenda_slides(steps=steps)))
+    ).slides[1]
+
+    short_title_shape = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == short_title)
+    long_title_shape = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == long_title)
+    concise_body_shape = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == concise_body)
+    long_body_shape = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == long_body)
+
+    assert long_title_shape.text_frame.paragraphs[0].font.size < short_title_shape.text_frame.paragraphs[0].font.size
+    assert long_body_shape.text_frame.paragraphs[0].runs[0].font.size < concise_body_shape.text_frame.paragraphs[0].runs[0].font.size
+
+
+def _chapter_slide(**overrides) -> SlideData:
+    values = {
+        "index": 4,
+        "title": "Delivery Model",
+        "bullets": ["A concise supporting point."],
+        "notes": "",
+        "layout": "content",
+        "chapter_number": 2,
+        "chapter_title": "Product & Technology",
+    }
+    values.update(overrides)
+    return SlideData(**values)
+
+
+def _marker_shapes(slide):
+    number = [
+        shape
+        for shape in slide.shapes
+        if shape.has_text_frame and shape.text.strip() == "02"
+    ]
+    label = [
+        shape
+        for shape in slide.shapes
+        if shape.has_text_frame and shape.text.strip() == "PRODUCT & TECHNOLOGY"
+    ]
+    return number, label
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"variant": "big_statement"},
+        {"variant": "three_points", "bullets": ["Speed", "Trust", "Scale"]},
+        {"variant": "split_image"},
+        {"variant": "big_stat", "blocks": [{"type": "stat", "value": "48%", "label": "Faster delivery"}]},
+        {
+            "variant": "before_after",
+            "blocks": [{"type": "comparison", "headers": ["Before", "After"], "rows": [["Manual", "Automated"]]}],
+        },
+        {
+            "variant": "comparison_table",
+            "blocks": [{"type": "table", "headers": ["Capability", "Outcome"], "rows": [["Controls", "Embedded"]]}],
+        },
+        {"variant": "process", "blocks": [{"type": "process", "steps": [{"title": "Design", "body": "Align"}]}]},
+        {"variant": "quote", "blocks": [{"type": "quote", "text": "Build with confidence", "author": "Citi"}]},
+        {},
+        {
+            "chart_data": {
+                "type": "bar",
+                "title": "Adoption",
+                "categories": ["Now", "Next"],
+                "series": [{"name": "Rate", "values": [35.0, 62.0]}],
+            }
+        },
+        {
+            "blocks": [
+                {"type": "cards", "items": [{"title": "Platform", "body": "Scalable"}]},
+                {"type": "quote", "text": "Designed for growth"},
+            ]
+        },
+        {"layout": "section_divider", "subtitle": "How the platform creates value"},
+    ],
+    ids=[
+        "big-statement",
+        "three-points",
+        "split-image",
+        "big-stat",
+        "before-after",
+        "comparison-table",
+        "process",
+        "quote",
+        "standard-content",
+        "chart-data",
+        "block-driven",
+        "section-divider",
+    ],
+)
+def test_all_content_routes_render_active_agenda_chapter_marker(overrides):
+    slides = [
+        SlideData(index=1, title="Cover", bullets=[], notes="", layout="title"),
+        _chapter_slide(**overrides),
+    ]
+
+    slide = Presentation(BytesIO(PptxEngine().render(slides))).slides[1]
+    number, label = _marker_shapes(slide)
+
+    assert len(number) == 1
+    assert len(label) == 1
+
+
+def test_related_slides_repeat_chapter_number_until_next_agenda_chapter():
+    slides = [
+        SlideData(index=1, title="Cover", bullets=[], notes="", layout="title"),
+        _chapter_slide(index=3, title="Market Context", chapter_number=1, chapter_title="Market Opportunity"),
+        _chapter_slide(index=4, title="Customer Needs", chapter_number=1, chapter_title="Market Opportunity"),
+        _chapter_slide(index=5, title="Platform", chapter_number=2, chapter_title="Product & Technology"),
+    ]
+
+    prs = Presentation(BytesIO(PptxEngine().render(slides)))
+
+    assert ["01" in _texts(prs.slides[index]) for index in (1, 2)] == [True, True]
+    assert "02" in _texts(prs.slides[3])
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        SlideData(
+            index=1,
+            title="Cover",
+            bullets=[],
+            notes="",
+            layout="title",
+            chapter_number=2,
+            chapter_title="Product & Technology",
+        ),
+        SlideData(
+            index=2,
+            title="Presentation Agenda",
+            bullets=["Product & Technology"],
+            notes="",
+            layout="content",
+            variant="process",
+            chapter_number=2,
+            chapter_title="Product & Technology",
+        ),
+        SlideData(
+            index=9,
+            title="Thank You",
+            bullets=["Questions"],
+            notes="",
+            layout="next_steps",
+            variant="closing",
+            chapter_number=2,
+            chapter_title="Product & Technology",
+        ),
+    ],
+    ids=["cover", "agenda", "closing"],
+)
+def test_non_chapter_slides_omit_marker_with_stale_metadata(data):
+    slide = Presentation(BytesIO(PptxEngine().render([data]))).slides[0]
+
+    number, label = _marker_shapes(slide)
+
+    assert number == []
+    assert label == []
+
+
+def test_content_without_chapter_metadata_has_no_index_derived_marker():
+    data = SlideData(
+        index=5,
+        title="Unassigned Content",
+        bullets=["No chapter metadata is available."],
+        notes="",
+        layout="content",
+    )
+
+    text = _texts(Presentation(BytesIO(PptxEngine().render([data]))).slides[0])
+
+    assert "03" not in text
+
+
+@pytest.mark.parametrize(
+    ("chapter_number", "chapter_title"),
+    [(2, None), (None, "Product & Technology")],
+    ids=["missing-title", "missing-number"],
+)
+def test_incomplete_chapter_metadata_omits_marker(chapter_number, chapter_title):
+    slide = Presentation(
+        BytesIO(
+            PptxEngine().render(
+                [
+                    _chapter_slide(
+                        chapter_number=chapter_number,
+                        chapter_title=chapter_title,
+                    )
+                ]
+            )
+        )
+    ).slides[0]
+
+    marker_text = {"02", "PRODUCT & TECHNOLOGY"}
+
+    assert marker_text.isdisjoint(_texts(slide))
+
+
+def test_section_divider_uses_only_universal_chapter_number():
+    data = _chapter_slide(
+        index=7,
+        layout="section_divider",
+        subtitle="How the platform creates value",
+        chapter_number=2,
+        chapter_title="Product & Technology",
+    )
+
+    text = _texts(Presentation(BytesIO(PptxEngine().render([data]))).slides[0])
+
+    assert text.count("02") == 1
+    assert "03" not in text
+    assert "3." not in text
+
+
+@pytest.mark.parametrize("aspect_ratio", ["16:9", "4:3"])
+def test_chapter_marker_is_bounded_fits_and_avoids_citi_logo(aspect_ratio):
+    prs = Presentation(BytesIO(PptxEngine(aspect_ratio=aspect_ratio).render([_chapter_slide()])))
+    slide = prs.slides[0]
+    number, label = _marker_shapes(slide)
+    logo = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == "citi")
+    marker_shapes = [number[0], label[0]]
+
+    assert all(shape.left >= 0 and shape.top >= 0 for shape in marker_shapes)
+    assert all(shape.left + shape.width <= prs.slide_width for shape in marker_shapes)
+    assert all(shape.top + shape.height <= prs.slide_height for shape in marker_shapes)
+    assert all(shape.left + shape.width <= logo.left for shape in marker_shapes)
+    assert label[0].text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+
+@pytest.mark.parametrize("theme_name", ["minimalist", "bold", "dark"])
+def test_chapter_badge_uses_accessible_citi_red_with_white_text(theme_name):
+    slide = Presentation(
+        BytesIO(PptxEngine(theme=theme_name).render([_chapter_slide()]))
+    ).slides[0]
+    number, _ = _marker_shapes(slide)
+    badge = number[0]
+    badge_color = badge.fill.fore_color.rgb
+    number_color = badge.text_frame.paragraphs[0].font.color.rgb
+
+    assert badge_color == CITI_RED
+    assert number_color == WHITE
+    assert _contrast_ratio(number_color, badge_color) >= 4.5
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"variant": "split_image"},
+        {
+            "layout": "section_divider",
+            "subtitle": "How the platform creates value",
+            "image_b64": _PNG_1PX,
+        },
+    ],
+    ids=["split-image", "image-backed-section-divider"],
+)
+def test_chapter_marker_label_uses_light_text_on_dark_backed_routes(overrides):
+    slide = Presentation(
+        BytesIO(PptxEngine().render([_chapter_slide(**overrides)]))
+    ).slides[0]
+    number, label = _marker_shapes(slide)
+
+    assert number[0].text_frame.paragraphs[0].font.color.rgb == WHITE
+    assert label[0].text_frame.paragraphs[0].font.color.rgb == THEMES["dark"].text
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"variant": "split_image", "image_b64": _PNG_1PX},
+        {
+            "layout": "section_divider",
+            "subtitle": "How the platform creates value",
+            "image_b64": _PNG_1PX,
+        },
+    ],
+    ids=["split-image", "image-backed-section-divider"],
+)
+def test_chapter_marker_renders_after_full_bleed_body_and_before_logo(overrides):
+    slide = Presentation(
+        BytesIO(PptxEngine().render([_chapter_slide(**overrides)]))
+    ).slides[0]
+    shapes = list(slide.shapes)
+    number, label = _marker_shapes(slide)
+    logo = next(shape for shape in shapes if shape.has_text_frame and shape.text.strip() == "citi")
+    body_picture = next(shape for shape in shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE)
+    body_indices = [shapes.index(body_picture)]
+    full_slide_overlays = [
+        index
+        for index, shape in enumerate(shapes)
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and shape.auto_shape_type == MSO_SHAPE.RECTANGLE
+        and shape.left == 0
+        and shape.top == 0
+        and shape.width == slide.part.package.presentation_part.presentation.slide_width
+        and shape.height == slide.part.package.presentation_part.presentation.slide_height
+    ]
+    body_indices.extend(full_slide_overlays)
+    badge_index = shapes.index(number[0])
+    label_index = shapes.index(label[0])
+    logo_index = shapes.index(logo)
+
+    assert max(body_indices) < badge_index < logo_index
+    assert max(body_indices) < label_index < logo_index
+    assert number[0].left + number[0].width <= logo.left
+    assert label[0].left + label[0].width <= logo.left
+
+
+@pytest.mark.parametrize(
+    ("kicker", "expected_title_top", "expected_rule_top"),
+    [("PLATFORM", 1.18, 1.96), (None, 0.86, 1.78)],
+)
+def test_content_header_moves_below_chapter_marker(kicker, expected_title_top, expected_rule_top):
+    data = _chapter_slide(kicker=kicker)
+    slide = Presentation(BytesIO(PptxEngine().render([data]))).slides[0]
+    title = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == data.title)
+    accent_rules = [
+        shape
+        for shape in slide.shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and shape.auto_shape_type == MSO_SHAPE.RECTANGLE
+        and shape.fill.fore_color.rgb == THEMES["minimalist"].accent
+        and shape.height <= Inches(0.1)
+    ]
+
+    assert title.top == Inches(expected_title_top)
+    assert any(shape.top == Inches(expected_rule_top) for shape in accent_rules)
+
+
+def test_big_statement_supporting_points_span_lower_slide_width():
+    slides = [
+        SlideData(index=1, title="Cover", bullets=[], notes="", layout="title"),
+        SlideData(
+            index=2,
+            title="Explosive Growth in Short Video Content Demands Scalable AI Solutions",
+            kicker="MARKET DYNAMICS",
+            bullets=[
+                "Short-form video now accounts for over 80% of all mobile internet traffic.",
+                "The global short video market is projected to exceed $150 billion by 2027.",
+                "Creators need automation to produce high-quality content at scale.",
+            ],
+            notes="",
+            layout="content",
+            variant="big_statement",
+        ),
+    ]
+
+    prs = Presentation(BytesIO(PptxEngine().render(slides)))
+    slide = prs.slides[1]
+    supporting_shapes = [
+        shape
+        for shape in slide.shapes
+        if shape.has_text_frame and "Short-form video" in shape.text
+    ]
+
+    assert supporting_shapes
+    assert supporting_shapes[0].width > Inches(12)
+    assert supporting_shapes[0].top < Inches(7.1)
 
 
 def test_framework_deck_uses_diverse_structures_not_repeated_card_grids():

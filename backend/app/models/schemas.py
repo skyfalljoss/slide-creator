@@ -77,6 +77,8 @@ class SlideContent(BaseModel):
     title: str
     kicker: str | None = None
     subtitle: str | None = None
+    chapter_number: int | None = Field(default=None, ge=1, le=4)
+    chapter_title: str | None = Field(default=None, max_length=80)
     bullets: list[str]
     notes: str
     layout: str
@@ -111,6 +113,8 @@ class SlideData(BaseModel):
     title: str
     kicker: str | None = None
     subtitle: str | None = None
+    chapter_number: int | None = Field(default=None, ge=1, le=4)
+    chapter_title: str | None = Field(default=None, max_length=80)
     bullets: list[str]
     notes: str
     layout: str
@@ -182,6 +186,15 @@ class ExportRequest(BaseModel):
 class ExportResponse(BaseModel):
     download_url: str
     expires_at: datetime
+
+
+class SlidePreviewResponse(BaseModel):
+    deck_id: str
+    slide_index: int
+    image_b64: str
+    width: int = 1920
+    height: int = 1080
+    updated_at: str | None = None
 
 
 class DeckSummary(BaseModel):

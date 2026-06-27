@@ -7,7 +7,7 @@ Current slide JSON: {current_slide_json}
 
 Do not invent chart values. Preserve the slide index.
 Preserve or intentionally update framework fields so the slide remains renderable:
-- kicker, subtitle, variant, blocks, visual_direction, image_prompt, image_query, callout, and narrative_context.
+- kicker, subtitle, chapter_number, chapter_title, variant, blocks, visual_direction, image_prompt, image_query, callout, and narrative_context.
 - Keep layout within the allowed list unless the instruction explicitly changes the slide purpose.
 
 Content quality rules:

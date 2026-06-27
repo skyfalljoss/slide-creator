@@ -19,11 +19,15 @@ export function DeckProvider({ children }: { children: React.ReactNode }) {
     setGeneratedDeck: (deck) => {
       setState({
         sessionId: deck.sessionId,
+        savedDeckId: deck.savedDeckId ?? null,
         deckType: deck.deckType,
         slides: deck.slides,
         uploadedFile: deck.uploadedFile,
         lastExport: null,
       })
+    },
+    markDeckSaved: (deckId) => {
+      setState((current) => ({ ...current, savedDeckId: deckId }))
     },
     updateSlide: (slide) => {
       setState((current) => ({

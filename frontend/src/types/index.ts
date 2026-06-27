@@ -32,6 +32,8 @@ export interface SlideData {
   title: string
   kicker?: string | null
   subtitle?: string | null
+  chapter_number?: 1 | 2 | 3 | 4 | null
+  chapter_title?: string | null
   bullets: string[]
   notes: string
   layout: string
@@ -39,6 +41,8 @@ export interface SlideData {
   blocks?: SlideBlock[] | null
   chart_data: ChartData | null
   visual_direction?: string | null
+  callout?: string | null
+  narrative_context?: string | null
   chart_recommendation?: ChartRecommendation | null
   chart_audit?: ChartAudit | null
   image_query?: string | null
@@ -113,8 +117,18 @@ export interface ExportResponse {
   expires_at: string
 }
 
+export interface SlidePreviewResponse {
+  deck_id: string
+  slide_index: number
+  image_b64: string
+  width: number
+  height: number
+  updated_at: string | null
+}
+
 export interface DeckState {
   sessionId: string | null
+  savedDeckId: string | null
   deckType: DeckType | null
   slides: SlideData[]
   uploadedFile: UploadResponse | null
