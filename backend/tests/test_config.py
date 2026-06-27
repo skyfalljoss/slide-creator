@@ -4,7 +4,18 @@ from app.config import Settings, validate_settings
 from app.errors import ConfigurationError
 
 
-def test_database_and_onlyoffice_defaults():
+def test_database_and_onlyoffice_defaults(monkeypatch):
+    for variable in (
+        "DATABASE_URL",
+        "ONLYOFFICE_ENABLED",
+        "ONLYOFFICE_PUBLIC_URL",
+        "ONLYOFFICE_INTERNAL_URL",
+        "ONLYOFFICE_JWT_SECRET",
+        "ONLYOFFICE_FILE_TOKEN_TTL_SECONDS",
+        "ONLYOFFICE_MAX_FILE_BYTES",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
     configured = Settings(_env_file=None)
 
     assert configured.database_url.startswith("sqlite+aiosqlite:///.data/deck_versions.db")
@@ -13,7 +24,11 @@ def test_database_and_onlyoffice_defaults():
     assert configured.onlyoffice_max_file_bytes == 50_000_000
 
 
-def test_onlyoffice_requires_jwt_secret_when_enabled():
+def test_onlyoffice_requires_jwt_secret_when_enabled(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("ONLYOFFICE_ENABLED", raising=False)
+    monkeypatch.delenv("ONLYOFFICE_JWT_SECRET", raising=False)
+
     configured = Settings(
         _env_file=None,
         onlyoffice_enabled=True,

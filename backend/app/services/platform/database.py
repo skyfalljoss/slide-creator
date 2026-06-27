@@ -4,11 +4,14 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.services.platform.deck_models import Base
+from app.services.platform.sqlite import enable_sqlite_foreign_keys, prepare_sqlite_database
 
 
 class Database:
     def __init__(self, url: str) -> None:
+        prepare_sqlite_database(url)
         self.engine = create_async_engine(url)
+        enable_sqlite_foreign_keys(self.engine)
         self._session_factory = async_sessionmaker(
             self.engine,
             class_=AsyncSession,
