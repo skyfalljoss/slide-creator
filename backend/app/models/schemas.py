@@ -162,6 +162,11 @@ class GenerateResponse(BaseModel):
     slides: list[SlideData]
 
 
+class OnlyOfficeEditorConfig(BaseModel):
+    document_server_url: str
+    config: dict[str, object]
+
+
 class UploadResponse(BaseModel):
     file_id: str
     filename: str

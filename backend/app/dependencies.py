@@ -18,6 +18,7 @@ from app.services.platform.deck_files import (
     LocalDeckFileStorage,
 )
 from app.services.platform.deck_versions import DeckVersionService
+from app.services.platform.onlyoffice import OnlyOfficeService
 from app.services.presentation.pptx_preview import PptxPreviewService
 
 
@@ -102,6 +103,16 @@ def get_deck_version_service() -> DeckVersionService:
         sample_template_path=settings.sample_template_path,
         max_file_bytes=settings.onlyoffice_max_file_bytes,
         retention=settings.deck_version_retention,
+    )
+
+
+@lru_cache
+def get_onlyoffice_service() -> OnlyOfficeService:
+    return OnlyOfficeService(
+        public_url=settings.onlyoffice_public_url,
+        api_base_url=settings.api_base_url,
+        jwt_secret=settings.onlyoffice_jwt_secret,
+        file_token_ttl_seconds=settings.onlyoffice_file_token_ttl_seconds,
     )
 
 
