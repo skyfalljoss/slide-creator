@@ -92,6 +92,25 @@ async def test_local_filesystem_inspection_runs_off_event_loop(tmp_path: Path, m
     assert await storage.exists("decks/missing.pptx") is False
 
 
+@pytest.mark.asyncio
+async def test_local_root_resolution_runs_off_event_loop(tmp_path: Path, monkeypatch):
+    event_loop_thread = threading.get_ident()
+    original_resolve = Path.resolve
+    resolve_threads: list[int] = []
+
+    def checked_resolve(path: Path, *args, **kwargs):
+        resolve_threads.append(threading.get_ident())
+        assert resolve_threads[-1] != event_loop_thread
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", checked_resolve)
+
+    storage = LocalDeckFileStorage(tmp_path)
+
+    assert await storage.exists("decks/missing.pptx") is False
+    assert resolve_threads
+
+
 @pytest.fixture
 def gcs_storage():
     client = MagicMock()

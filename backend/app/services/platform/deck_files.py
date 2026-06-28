@@ -1,5 +1,6 @@
 import asyncio
 import os
+import threading
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
@@ -55,18 +56,27 @@ class LocalDeckFileStorage:
     """
 
     def __init__(self, root: Path):
-        self.root = Path(root).resolve()
+        self.root = Path(root)
+        self._resolved_root: Path | None = None
+        self._root_lock = threading.Lock()
+
+    def _trusted_root(self) -> Path:
+        with self._root_lock:
+            if self._resolved_root is None:
+                self._resolved_root = self.root.resolve()
+            return self._resolved_root
 
     def _path_for(self, key: str) -> Path:
         normalized = _normalize_key(key)
-        path = self.root.joinpath(*PurePosixPath(normalized).parts)
-        current = self.root
+        root = self._trusted_root()
+        path = root.joinpath(*PurePosixPath(normalized).parts)
+        current = root
         for part in PurePosixPath(normalized).parts:
             current = current / part
             if current.is_symlink():
                 raise ValueError("Invalid storage key")
         try:
-            path.resolve(strict=False).relative_to(self.root)
+            path.resolve(strict=False).relative_to(root)
         except ValueError as exc:
             raise ValueError("Invalid storage key") from exc
         return path
@@ -114,10 +124,11 @@ class LocalDeckFileStorage:
         normalized_prefix = _normalize_prefix(prefix)
 
         def list_files() -> list[str]:
-            if not self.root.exists():
+            root = self._trusted_root()
+            if not root.exists():
                 return []
             keys: list[str] = []
-            for directory, directory_names, file_names in os.walk(self.root, followlinks=False):
+            for directory, directory_names, file_names in os.walk(root, followlinks=False):
                 directory_path = Path(directory)
                 directory_names[:] = [
                     name for name in directory_names if not (directory_path / name).is_symlink()
@@ -127,7 +138,7 @@ class LocalDeckFileStorage:
                     if path.is_symlink() or not path.is_file():
                         continue
                     try:
-                        relative = path.resolve(strict=True).relative_to(self.root).as_posix()
+                        relative = path.resolve(strict=True).relative_to(root).as_posix()
                     except (FileNotFoundError, ValueError):
                         continue
                     if relative.startswith(normalized_prefix):
