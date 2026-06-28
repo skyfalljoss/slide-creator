@@ -39,3 +39,18 @@ def test_onlyoffice_requires_jwt_secret_when_enabled(monkeypatch):
 
     with pytest.raises(ConfigurationError, match="ONLYOFFICE_JWT_SECRET"):
         validate_settings(configured)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("storage_provider", "typo"),
+        ("deck_version_retention", 0),
+        ("deck_version_retention", 101),
+        ("onlyoffice_max_file_bytes", 0),
+        ("onlyoffice_file_token_ttl_seconds", 0),
+    ],
+)
+def test_deck_version_settings_reject_invalid_values(field, value):
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, **{field: value})

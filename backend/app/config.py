@@ -1,3 +1,6 @@
+from typing import Literal
+
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from app.errors import ConfigurationError
@@ -11,7 +14,7 @@ class Settings(BaseSettings):
     gcs_bucket: str = "slideforge-temp"
     ai_provider: str = "local"
     dlp_provider: str = "local"
-    storage_provider: str = "local"
+    storage_provider: Literal["local", "gcs"] = "local"
     local_export_dir: str = ".exports"
     local_upload_dir: str = ".uploads"
     max_upload_bytes: int = 5_000_000
@@ -27,9 +30,11 @@ class Settings(BaseSettings):
     onlyoffice_public_url: str = "http://localhost:8080"
     onlyoffice_internal_url: str = "http://onlyoffice"
     onlyoffice_jwt_secret: str = ""
-    onlyoffice_file_token_ttl_seconds: int = 300
-    onlyoffice_max_file_bytes: int = 50_000_000
-    deck_version_retention: int = 5
+    onlyoffice_file_token_ttl_seconds: int = Field(default=300, gt=0)
+    onlyoffice_max_file_bytes: int = Field(
+        default=50_000_000, gt=0, le=500_000_000
+    )
+    deck_version_retention: int = Field(default=5, ge=1, le=100)
     max_prompt_length: int = 5000
     citi_sso_enabled: bool = False
     allowed_origins: list[str] = ["http://localhost:5173"]

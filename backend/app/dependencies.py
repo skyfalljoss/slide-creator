@@ -85,6 +85,15 @@ def get_deck_file_storage() -> DeckFileStorage:
     return LocalDeckFileStorage(settings.local_deck_file_dir)
 
 
+async def close_deck_file_storage() -> None:
+    if get_deck_file_storage.cache_info().currsize == 0:
+        return
+    storage = get_deck_file_storage()
+    close = getattr(storage, "close", None)
+    if close is not None:
+        await close()
+
+
 @lru_cache
 def get_deck_version_service() -> DeckVersionService:
     return DeckVersionService(

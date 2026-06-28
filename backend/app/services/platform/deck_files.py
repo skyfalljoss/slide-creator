@@ -151,7 +151,12 @@ class LocalDeckFileStorage:
 class GCSDeckFileStorage:
     def __init__(self, bucket_name: str | None = None, client: gcs.Client | None = None):
         self.bucket_name = bucket_name or settings.gcs_bucket
+        self._owns_client = client is None
         self._client = client or gcs.Client(project=settings.gcp_project_id)
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await asyncio.to_thread(self._client.close)
 
     def _bucket(self) -> gcs.Bucket:
         return self._client.bucket(self.bucket_name)

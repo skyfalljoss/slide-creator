@@ -130,6 +130,24 @@ def test_gcs_storage_uses_configured_bucket_by_default(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gcs_storage_closes_only_owned_client(monkeypatch):
+    owned_client = MagicMock()
+    monkeypatch.setattr(
+        "app.services.platform.deck_files.gcs.Client",
+        MagicMock(return_value=owned_client),
+    )
+    owned = GCSDeckFileStorage("deck-bucket")
+    injected_client = MagicMock()
+    injected = GCSDeckFileStorage("deck-bucket", client=injected_client)
+
+    await owned.close()
+    await injected.close()
+
+    owned_client.close.assert_called_once_with()
+    injected_client.close.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_gcs_put_is_immutable_and_sets_pptx_content_type(gcs_storage):
     storage, bucket = gcs_storage
     blob = bucket.blob.return_value

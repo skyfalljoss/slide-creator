@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
     _configure_logging()
     _validate_config()
     from app.dependencies import (
+        close_deck_file_storage,
         get_database,
         get_deck_file_storage,
         get_deck_repository,
@@ -69,11 +70,14 @@ async def lifespan(app: FastAPI):
                 if not http_client.is_closed:
                     await http_client.aclose()
             finally:
-                get_deck_version_service.cache_clear()
-                get_deck_file_storage.cache_clear()
-                get_deck_repository.cache_clear()
-                get_database.cache_clear()
-                get_http_client.cache_clear()
+                try:
+                    await close_deck_file_storage()
+                finally:
+                    get_deck_version_service.cache_clear()
+                    get_deck_file_storage.cache_clear()
+                    get_deck_repository.cache_clear()
+                    get_database.cache_clear()
+                    get_http_client.cache_clear()
 
 
 app = FastAPI(
