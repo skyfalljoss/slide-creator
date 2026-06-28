@@ -1,3 +1,4 @@
+from functools import lru_cache
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -80,3 +81,42 @@ async def test_lifespan_closes_http_client_even_if_database_disposal_fails(monke
             pass
 
     http_client.aclose.assert_awaited_once()
+
+
+async def test_lifespan_clears_caches_for_fresh_resources_on_restart(monkeypatch):
+    databases = []
+    http_clients = []
+
+    @lru_cache
+    def database_factory():
+        database = Mock(create_schema=AsyncMock(), dispose=AsyncMock())
+        databases.append(database)
+        return database
+
+    @lru_cache
+    def http_client_factory():
+        client = Mock(aclose=AsyncMock(), is_closed=False)
+        http_clients.append(client)
+        return client
+
+    legacy_store = Mock(initialize=AsyncMock())
+    monkeypatch.setattr(settings, "database_url", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.setattr(dependencies, "get_database", database_factory)
+    monkeypatch.setattr(dependencies, "get_deck_store", lambda: legacy_store)
+    monkeypatch.setattr(dependencies, "get_http_client", http_client_factory)
+    monkeypatch.setattr(dependencies.get_deck_repository, "cache_clear", Mock())
+    monkeypatch.setattr("app.main.purge_local_temp_files", Mock())
+
+    async with lifespan(app):
+        assert dependencies.get_database() is databases[0]
+        assert dependencies.get_http_client() is http_clients[0]
+    async with lifespan(app):
+        assert dependencies.get_database() is databases[1]
+        assert dependencies.get_http_client() is http_clients[1]
+
+    assert databases[0] is not databases[1]
+    assert http_clients[0] is not http_clients[1]
+    for database in databases:
+        database.dispose.assert_awaited_once()
+    for client in http_clients:
+        client.aclose.assert_awaited_once()

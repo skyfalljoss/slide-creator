@@ -1,12 +1,15 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.platform.database import Database
 from app.services.platform.deck_models import DeckRow, DeckVersionRow
-from app.services.platform.deck_repository import DeckRepository
+from app.services.platform.deck_repository import DeckRepository, _owned_deck_for_write
 
 
 @pytest.fixture
@@ -17,6 +20,19 @@ async def repository(tmp_path):
         yield DeckRepository(database), database
     finally:
         await database.dispose()
+
+
+@pytest.fixture
+async def independent_repositories(tmp_path):
+    url = f"sqlite+aiosqlite:///{tmp_path / 'concurrent-decks.db'}"
+    first_database = Database(url)
+    second_database = Database(url)
+    await first_database.create_schema()
+    try:
+        yield DeckRepository(first_database), DeckRepository(second_database)
+    finally:
+        await first_database.dispose()
+        await second_database.dispose()
 
 
 async def create_deck(
@@ -42,6 +58,23 @@ async def create_deck(
         sha256="a" * 64,
         size_bytes=123,
     )
+
+
+def test_owned_deck_write_query_locks_on_postgresql_only():
+    # Live PostgreSQL append-vs-delete integration remains an opt-in Task 13 test.
+    postgres_query = str(
+        _owned_deck_for_write("deck-1", "owner-1", "postgresql").compile(
+            dialect=postgresql.dialect()
+        )
+    )
+    sqlite_query = str(
+        _owned_deck_for_write("deck-1", "owner-1", "sqlite").compile(
+            dialect=sqlite.dialect()
+        )
+    )
+
+    assert "FOR UPDATE" in postgres_query
+    assert "FOR UPDATE" not in sqlite_query
 
 
 async def test_create_with_initial_version_sets_current_version_atomically(repository):
@@ -75,6 +108,31 @@ async def test_owner_scopes_user_facing_queries_and_mutations(repository):
     assert await repo.list_versions("deck-1", "other-owner") == []
     assert await repo.list_all("other-owner") == []
     assert (await repo.get("deck-1", "owner-1")).name == "Quarterly Review"
+
+
+async def test_corrupt_cross_deck_current_pointer_does_not_expose_other_version(repository):
+    repo, database = repository
+    await create_deck(repo)
+    await create_deck(
+        repo,
+        deck_id="deck-2",
+        version_id="deck-2-v1",
+        owner_id="owner-1",
+        name="Other Deck",
+    )
+    async with database.session() as session, session.begin():
+        await session.execute(
+            update(DeckRow)
+            .where(DeckRow.id == "deck-1")
+            .values(current_version_id="deck-2-v1")
+        )
+
+    deck = await repo.get("deck-1", "owner-1")
+    summary = (await repo.list_all("owner-1", search="Quarterly Review"))[0]
+
+    assert deck is not None
+    assert deck.current_version is None
+    assert summary.current_version_number is None
 
 
 async def test_list_all_filters_sorts_pages_and_counts_slides_safely(repository):
@@ -149,6 +207,7 @@ async def test_list_all_filters_sorts_pages_and_counts_slides_safely(repository)
     ("kwargs", "message"),
     [
         ({"limit": 0}, "limit"),
+        ({"limit": 101}, "limit"),
         ({"offset": -1}, "offset"),
         ({"sort": "recent"}, "sort"),
     ],
@@ -267,6 +326,130 @@ async def test_stale_base_still_appends_distinct_current_version(repository):
 
     assert stale.version_number == 3
     assert (await repo.get("deck-1", "owner-1")).current_version_id == "version-stale"
+
+
+async def test_concurrent_sqlite_appends_allocate_distinct_versions(
+    independent_repositories,
+    monkeypatch,
+):
+    first_repo, second_repo = independent_repositories
+    await create_deck(first_repo)
+
+    first_at_max = asyncio.Event()
+    second_at_max = asyncio.Event()
+    release_first = asyncio.Event()
+    original_scalar = AsyncSession.scalar
+
+    async def pause_allocator(self, statement, *args, **kwargs):
+        result = await original_scalar(self, statement, *args, **kwargs)
+        if "max(deck_versions.version_number)" in str(statement).lower():
+            if asyncio.current_task().get_name() == "append-first":
+                first_at_max.set()
+                await release_first.wait()
+            else:
+                second_at_max.set()
+        return result
+
+    monkeypatch.setattr(AsyncSession, "scalar", pause_allocator)
+    first_task = asyncio.create_task(
+        first_repo.append_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            version_id="version-a",
+            storage_key="decks/deck-1/version-a.pptx",
+            sha256="b" * 64,
+            size_bytes=2,
+            source="edited",
+            created_by="owner-1",
+        ),
+        name="append-first",
+    )
+    await asyncio.wait_for(first_at_max.wait(), timeout=1)
+    second_task = asyncio.create_task(
+        second_repo.append_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            version_id="version-b",
+            storage_key="decks/deck-1/version-b.pptx",
+            sha256="c" * 64,
+            size_bytes=3,
+            source="edited",
+            created_by="owner-1",
+        ),
+        name="append-second",
+    )
+    try:
+        await asyncio.wait_for(second_at_max.wait(), timeout=0.05)
+    except TimeoutError:
+        pass
+    finally:
+        release_first.set()
+
+    first, second = await asyncio.gather(first_task, second_task)
+    assert sorted([first.version_number, second.version_number]) == [2, 3]
+    assert [
+        version.version_number
+        for version in await first_repo.list_versions("deck-1", "owner-1")
+    ] == [
+        3,
+        2,
+        1,
+    ]
+
+
+async def test_concurrent_sqlite_append_and_delete_have_consistent_outcome(
+    independent_repositories,
+    monkeypatch,
+):
+    append_repo, delete_repo = independent_repositories
+    await create_deck(append_repo)
+    appended_key = "decks/deck-1/version-racing.pptx"
+    delete_read_keys = asyncio.Event()
+    release_delete = asyncio.Event()
+    original_scalars = AsyncSession.scalars
+
+    async def pause_delete_after_key_snapshot(self, statement, *args, **kwargs):
+        result = await original_scalars(self, statement, *args, **kwargs)
+        if (
+            asyncio.current_task().get_name() == "delete-deck"
+            and "deck_versions.storage_key" in str(statement).lower()
+        ):
+            delete_read_keys.set()
+            await release_delete.wait()
+        return result
+
+    monkeypatch.setattr(AsyncSession, "scalars", pause_delete_after_key_snapshot)
+
+    async def append():
+        try:
+            return await append_repo.append_version(
+                deck_id="deck-1",
+                owner_id="owner-1",
+                version_id="version-racing",
+                storage_key=appended_key,
+                sha256="d" * 64,
+                size_bytes=4,
+                source="edited",
+                created_by="owner-1",
+            )
+        except LookupError:
+            return None
+
+    delete_task = asyncio.create_task(
+        delete_repo.delete("deck-1", "owner-1"),
+        name="delete-deck",
+    )
+    await asyncio.wait_for(delete_read_keys.wait(), timeout=1)
+    append_task = asyncio.create_task(append(), name="append-version")
+    await asyncio.sleep(0.05)
+    release_delete.set()
+    appended, deleted_keys = await asyncio.gather(append_task, delete_task)
+
+    if appended is None:
+        assert deleted_keys == ["decks/deck-1/version-1.pptx"]
+    else:
+        assert appended_key in deleted_keys
+    assert await append_repo.get("deck-1", "owner-1") is None
 
 
 async def test_append_missing_or_cross_owner_deck_returns_missing(repository):

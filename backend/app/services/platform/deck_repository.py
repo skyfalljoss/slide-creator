@@ -1,15 +1,53 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import delete as sqlalchemy_delete
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from app.services.platform.database import Database
 from app.services.platform.deck_models import DeckRow, DeckVersionRow
 
 
 logger = structlog.get_logger(__name__)
+
+
+def _owned_deck_for_write(
+    deck_id: str,
+    owner_id: str,
+    dialect_name: str,
+) -> Select[tuple[DeckRow]]:
+    statement = select(DeckRow).where(
+        DeckRow.id == deck_id,
+        DeckRow.owner_id == owner_id,
+    )
+    if dialect_name == "postgresql":
+        statement = statement.with_for_update()
+    return statement
+
+
+@asynccontextmanager
+async def _serialized_write(session: AsyncSession) -> AsyncIterator[None]:
+    dialect_name = session.bind.dialect.name if session.bind is not None else ""
+    if dialect_name == "sqlite":
+        # Reserve SQLite's single writer before reading a version number or
+        # deletion snapshot. This serializes across connections and processes.
+        await session.execute(text("BEGIN IMMEDIATE"))
+        try:
+            yield
+        except BaseException:
+            await session.rollback()
+            raise
+        else:
+            await session.commit()
+        return
+
+    async with session.begin():
+        yield
 
 
 @dataclass(frozen=True)
@@ -155,7 +193,12 @@ class DeckRepository:
                 return None
             version = None
             if deck.current_version_id is not None:
-                version = await session.get(DeckVersionRow, deck.current_version_id)
+                version = await session.scalar(
+                    select(DeckVersionRow).where(
+                        DeckVersionRow.id == deck.current_version_id,
+                        DeckVersionRow.deck_id == deck.id,
+                    )
+                )
             return _deck_record(deck, version)
 
     async def list_all(
@@ -167,8 +210,8 @@ class DeckRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[DeckSummaryRecord]:
-        if limit < 1:
-            raise ValueError("limit must be at least 1")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if sort not in {"newest", "oldest", "name"}:
@@ -176,7 +219,13 @@ class DeckRepository:
 
         statement = (
             select(DeckRow, DeckVersionRow.version_number)
-            .outerjoin(DeckVersionRow, DeckVersionRow.id == DeckRow.current_version_id)
+            .outerjoin(
+                DeckVersionRow,
+                and_(
+                    DeckVersionRow.id == DeckRow.current_version_id,
+                    DeckVersionRow.deck_id == DeckRow.id,
+                ),
+            )
             .where(DeckRow.owner_id == owner_id)
         )
         if search:
@@ -194,6 +243,8 @@ class DeckRepository:
         async with self._database.session() as session:
             rows = (await session.execute(statement)).all()
 
+        # The 100-row cap bounds JSON loading while slide_count remains portable
+        # across SQLite and PostgreSQL JSON implementations.
         summaries = []
         for deck, current_version_number in rows:
             payload = deck.generation_payload
@@ -224,9 +275,13 @@ class DeckRepository:
 
     async def delete(self, deck_id: str, owner_id: str) -> list[str]:
         async with self._database.session() as session:
-            async with session.begin():
+            async with _serialized_write(session):
                 deck = await session.scalar(
-                    select(DeckRow).where(DeckRow.id == deck_id, DeckRow.owner_id == owner_id)
+                    _owned_deck_for_write(
+                        deck_id,
+                        owner_id,
+                        session.bind.dialect.name if session.bind is not None else "",
+                    )
                 )
                 if deck is None:
                     return []
@@ -266,14 +321,14 @@ class DeckRepository:
     ) -> DeckVersionRecord:
         now = datetime.now(timezone.utc)
         async with self._database.session() as session:
-            async with session.begin():
-                deck_statement = select(DeckRow).where(
-                    DeckRow.id == deck_id,
-                    DeckRow.owner_id == owner_id,
+            async with _serialized_write(session):
+                deck = await session.scalar(
+                    _owned_deck_for_write(
+                        deck_id,
+                        owner_id,
+                        session.bind.dialect.name if session.bind is not None else "",
+                    )
                 )
-                if session.bind is not None and session.bind.dialect.name == "postgresql":
-                    deck_statement = deck_statement.with_for_update()
-                deck = await session.scalar(deck_statement)
                 if deck is None:
                     raise LookupError("Deck not found")
                 if base_version_id is not None and base_version_id != deck.current_version_id:
