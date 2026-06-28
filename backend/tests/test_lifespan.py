@@ -89,6 +89,40 @@ async def test_lifespan_closes_http_client_even_if_database_disposal_fails(monke
     http_client.aclose.assert_awaited_once()
 
 
+async def test_lifespan_preserves_first_shutdown_error_and_attempts_all_cleanup(monkeypatch):
+    first_error = RuntimeError("database dispose failed")
+    database = Mock(
+        create_schema=AsyncMock(),
+        dispose=AsyncMock(side_effect=first_error),
+    )
+    legacy_store = Mock(initialize=AsyncMock())
+    http_client = Mock(
+        aclose=AsyncMock(side_effect=RuntimeError("http close failed")),
+        is_closed=False,
+    )
+    close_storage = AsyncMock(side_effect=RuntimeError("gcs close failed"))
+    monkeypatch.setattr(settings, "database_url", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.setattr(dependencies, "get_database", lambda: database)
+    monkeypatch.setattr(dependencies, "get_deck_store", lambda: legacy_store)
+    monkeypatch.setattr(dependencies, "get_http_client", lambda: http_client)
+    monkeypatch.setattr(dependencies, "close_deck_file_storage", close_storage)
+    monkeypatch.setattr(dependencies.get_deck_repository, "cache_clear", Mock())
+    monkeypatch.setattr(dependencies.get_deck_file_storage, "cache_clear", Mock())
+    monkeypatch.setattr(dependencies.get_deck_version_service, "cache_clear", Mock())
+    monkeypatch.setattr(dependencies.get_database, "cache_clear", Mock(), raising=False)
+    monkeypatch.setattr(dependencies.get_http_client, "cache_clear", Mock(), raising=False)
+    monkeypatch.setattr("app.main.purge_local_temp_files", Mock())
+
+    with pytest.raises(RuntimeError, match="database dispose failed") as raised:
+        async with lifespan(app):
+            pass
+
+    assert raised.value is first_error
+    http_client.aclose.assert_awaited_once()
+    close_storage.assert_awaited_once()
+    dependencies.get_database.cache_clear.assert_called_once()
+
+
 async def test_lifespan_clears_caches_for_fresh_resources_on_restart(monkeypatch):
     databases = []
     http_clients = []

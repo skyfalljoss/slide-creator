@@ -63,21 +63,36 @@ async def lifespan(app: FastAPI):
         purge_local_temp_files()
         yield
     finally:
+        shutdown_error: BaseException | None = None
         try:
             await database.dispose()
-        finally:
+        except BaseException as exc:
+            shutdown_error = exc
+        try:
+            if not http_client.is_closed:
+                await http_client.aclose()
+        except BaseException as exc:
+            if shutdown_error is None:
+                shutdown_error = exc
+        try:
+            await close_deck_file_storage()
+        except BaseException as exc:
+            if shutdown_error is None:
+                shutdown_error = exc
+        for clear_cache in (
+            get_deck_version_service.cache_clear,
+            get_deck_file_storage.cache_clear,
+            get_deck_repository.cache_clear,
+            get_database.cache_clear,
+            get_http_client.cache_clear,
+        ):
             try:
-                if not http_client.is_closed:
-                    await http_client.aclose()
-            finally:
-                try:
-                    await close_deck_file_storage()
-                finally:
-                    get_deck_version_service.cache_clear()
-                    get_deck_file_storage.cache_clear()
-                    get_deck_repository.cache_clear()
-                    get_database.cache_clear()
-                    get_http_client.cache_clear()
+                clear_cache()
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+        if shutdown_error is not None:
+            raise shutdown_error
 
 
 app = FastAPI(

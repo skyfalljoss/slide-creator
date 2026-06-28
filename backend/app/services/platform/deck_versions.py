@@ -9,7 +9,12 @@ import structlog
 
 from app.models.schemas import SlideData
 from app.services.platform.deck_files import DeckFileStorage
-from app.services.platform.deck_repository import DeckRecord, DeckRepository, DeckVersionRecord
+from app.services.platform.deck_repository import (
+    DeckRecord,
+    DeckRepository,
+    DeckVersionRecord,
+    DeckWriteRolledBackError,
+)
 from app.services.presentation.pptx_engine import PptxEngine
 from app.services.presentation.pptx_validation import validate_pptx
 
@@ -92,7 +97,16 @@ class DeckVersionService:
                 sha256=checksum,
                 size_bytes=len(content),
             )
-        except BaseException as repository_error:
+        except asyncio.CancelledError:
+            raise
+        except DeckWriteRolledBackError:
+            await self._delete_failed_upload(
+                deck_id=deck_id,
+                version_id=version_id,
+                storage_key=storage_key,
+            )
+            raise
+        except Exception as repository_error:
             return await self._reconcile_initial_exception(
                 repository_error=repository_error,
                 deck_id=deck_id,
@@ -151,7 +165,16 @@ class DeckVersionService:
                         created_by=created_by,
                         base_version_id=base_version_id,
                     )
-                except BaseException as repository_error:
+                except asyncio.CancelledError:
+                    raise
+                except DeckWriteRolledBackError:
+                    await self._delete_failed_upload(
+                        deck_id=deck_id,
+                        version_id=version_id,
+                        storage_key=storage_key,
+                    )
+                    raise
+                except Exception as repository_error:
                     result = await self._reconcile_append_exception(
                         repository_error=repository_error,
                         deck_id=deck_id,
@@ -246,7 +269,16 @@ class DeckVersionService:
                 base_version_id=base_version_id,
                 generation_payload=generation_payload,
             )
-        except BaseException as repository_error:
+        except asyncio.CancelledError:
+            raise
+        except DeckWriteRolledBackError:
+            await self._delete_failed_upload(
+                deck_id=deck_id,
+                version_id=version_id,
+                storage_key=storage_key,
+            )
+            raise
+        except Exception as repository_error:
             result = await self._reconcile_append_exception(
                 repository_error=repository_error,
                 deck_id=deck_id,
@@ -279,11 +311,6 @@ class DeckVersionService:
             )
             raise repository_error
         if deck is None:
-            await self._delete_failed_upload(
-                deck_id=deck_id,
-                version_id=version_id,
-                storage_key=storage_key,
-            )
             raise repository_error
         current = deck.current_version
         if (
@@ -319,11 +346,6 @@ class DeckVersionService:
             )
             raise repository_error
         if existing is None:
-            await self._delete_failed_upload(
-                deck_id=deck_id,
-                version_id=version_id,
-                storage_key=storage_key,
-            )
             raise repository_error
         if existing.storage_key != storage_key:
             raise VersionStorageConflictError(
@@ -403,7 +425,9 @@ class DeckVersionService:
                 created_by=created_by,
                 base_version_id=base_version_id,
             )
-        except BaseException as repair_error:
+        except asyncio.CancelledError:
+            raise
+        except Exception as repair_error:
             try:
                 existing = await self._repository.version(
                     deck_id, version_id, owner_id

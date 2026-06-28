@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.platform.database import Database
 from app.services.platform.deck_models import DeckRow, DeckVersionRow
-from app.services.platform.deck_repository import DeckRepository, _owned_deck_for_write
+from app.services.platform.deck_repository import (
+    DeckCommitUncertainError,
+    DeckRepository,
+    DeckWriteRolledBackError,
+    _owned_deck_for_write,
+)
 
 
 @pytest.fixture
@@ -432,7 +437,7 @@ async def test_concurrent_sqlite_append_and_delete_have_consistent_outcome(
                 source="edited",
                 created_by="owner-1",
             )
-        except LookupError:
+        except (LookupError, DeckWriteRolledBackError):
             return None
 
     delete_task = asyncio.create_task(
@@ -516,7 +521,7 @@ async def test_append_missing_or_cross_owner_deck_returns_missing(repository):
     repo, _database = repository
     await create_deck(repo)
 
-    with pytest.raises(LookupError, match="Deck not found"):
+    with pytest.raises(DeckWriteRolledBackError) as raised:
         await repo.append_version(
             deck_id="deck-1",
             owner_id="other-owner",
@@ -527,6 +532,9 @@ async def test_append_missing_or_cross_owner_deck_returns_missing(repository):
             source="edited",
             created_by="other-owner",
         )
+
+    assert isinstance(raised.value.cause, LookupError)
+    assert "Deck not found" in str(raised.value.cause)
 
 
 async def test_stale_versions_and_protected_row_deletion(repository):
@@ -593,13 +601,15 @@ async def test_create_rolls_back_deck_when_initial_version_is_not_unique(reposit
     repo, database = repository
     await create_deck(repo)
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DeckWriteRolledBackError) as raised:
         await create_deck(
             repo,
             deck_id="deck-2",
             version_id="version-1",
             owner_id="owner-2",
         )
+
+    assert isinstance(raised.value.cause, IntegrityError)
 
     async with database.session() as session:
         assert await session.get(DeckRow, "deck-2") is None
@@ -612,7 +622,7 @@ async def test_create_rolls_back_deck_when_initial_version_is_not_unique(reposit
 async def test_create_rolls_back_deck_when_initial_version_data_is_invalid(repository):
     repo, database = repository
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DeckWriteRolledBackError) as raised:
         await repo.create_with_initial_version(
             deck_id="invalid-deck",
             version_id="invalid-version",
@@ -627,6 +637,94 @@ async def test_create_rolls_back_deck_when_initial_version_data_is_invalid(repos
             size_bytes=None,  # type: ignore[arg-type]
         )
 
+    assert isinstance(raised.value.cause, IntegrityError)
+
     async with database.session() as session:
         assert await session.get(DeckRow, "invalid-deck") is None
         assert await session.get(DeckVersionRow, "invalid-version") is None
+
+
+async def test_append_commit_failure_is_classified_uncertain(repository, monkeypatch):
+    repo, _database = repository
+    await create_deck(repo)
+    commit_error = OSError("connection lost during commit")
+
+    async def fail_commit(_session):
+        raise commit_error
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_commit)
+
+    with pytest.raises(DeckCommitUncertainError) as raised:
+        await repo.append_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            version_id="version-uncertain",
+            storage_key="decks/deck-1/version-uncertain.pptx",
+            sha256="b" * 64,
+            size_bytes=2,
+            source="edited",
+            created_by="owner-1",
+        )
+
+    assert raised.value.cause is commit_error
+
+
+async def test_append_cancellation_rolls_back_and_propagates(repository, monkeypatch):
+    repo, _database = repository
+    await create_deck(repo)
+    rollback_calls = 0
+    original_rollback = AsyncSession.rollback
+
+    async def cancel_flush(_session, *args, **kwargs):
+        raise asyncio.CancelledError()
+
+    async def track_rollback(session):
+        nonlocal rollback_calls
+        rollback_calls += 1
+        await original_rollback(session)
+
+    monkeypatch.setattr(AsyncSession, "flush", cancel_flush)
+    monkeypatch.setattr(AsyncSession, "rollback", track_rollback)
+
+    with pytest.raises(asyncio.CancelledError):
+        await repo.append_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            version_id="version-cancelled",
+            storage_key="decks/deck-1/version-cancelled.pptx",
+            sha256="c" * 64,
+            size_bytes=3,
+            source="edited",
+            created_by="owner-1",
+        )
+
+    assert rollback_calls == 1
+
+
+async def test_append_rollback_failure_is_classified_uncertain(repository, monkeypatch):
+    repo, _database = repository
+    await create_deck(repo)
+    flush_error = RuntimeError("flush failed")
+
+    async def fail_flush(_session, *args, **kwargs):
+        raise flush_error
+
+    async def fail_rollback(_session):
+        raise OSError("rollback failed")
+
+    monkeypatch.setattr(AsyncSession, "flush", fail_flush)
+    monkeypatch.setattr(AsyncSession, "rollback", fail_rollback)
+
+    with pytest.raises(DeckCommitUncertainError) as raised:
+        await repo.append_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            version_id="version-rollback-unknown",
+            storage_key="decks/deck-1/version-rollback-unknown.pptx",
+            sha256="d" * 64,
+            size_bytes=4,
+            source="edited",
+            created_by="owner-1",
+        )
+
+    assert raised.value.cause is flush_error

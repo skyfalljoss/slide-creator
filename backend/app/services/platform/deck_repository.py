@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -14,6 +15,20 @@ from app.services.platform.deck_models import DeckRow, DeckVersionRow
 
 
 logger = structlog.get_logger(__name__)
+
+
+class DeckWriteError(RuntimeError):
+    def __init__(self, message: str, cause: BaseException) -> None:
+        super().__init__(message)
+        self.cause = cause
+
+
+class DeckWriteRolledBackError(DeckWriteError):
+    """The write failed before commit and rollback completed successfully."""
+
+
+class DeckCommitUncertainError(DeckWriteError):
+    """The write may have committed; referenced immutable data must be retained."""
 
 
 def _owned_deck_for_write(
@@ -48,6 +63,49 @@ async def _serialized_write(session: AsyncSession) -> AsyncIterator[None]:
 
     async with session.begin():
         yield
+
+
+@asynccontextmanager
+async def _classified_write(
+    session: AsyncSession,
+    *,
+    sqlite_immediate: bool = False,
+) -> AsyncIterator[None]:
+    if sqlite_immediate:
+        await session.execute(text("BEGIN IMMEDIATE"))
+    else:
+        await session.begin()
+    try:
+        yield
+    except asyncio.CancelledError:
+        try:
+            await session.rollback()
+        except BaseException:
+            logger.exception("deck_write_cancelled_rollback_failed")
+        raise
+    except Exception as cause:
+        try:
+            await session.rollback()
+        except asyncio.CancelledError:
+            raise
+        except Exception as rollback_error:
+            raise DeckCommitUncertainError(
+                "Deck write failed and rollback outcome is uncertain",
+                cause,
+            ) from rollback_error
+        raise DeckWriteRolledBackError(
+            "Deck write rolled back before commit",
+            cause,
+        ) from cause
+    try:
+        await session.commit()
+    except asyncio.CancelledError:
+        raise
+    except Exception as cause:
+        raise DeckCommitUncertainError(
+            "Deck write commit outcome is uncertain",
+            cause,
+        ) from cause
 
 
 @dataclass(frozen=True)
@@ -172,7 +230,7 @@ class DeckRepository:
             created_at=now,
         )
         async with self._database.session() as session:
-            async with session.begin():
+            async with _classified_write(session):
                 session.add(deck)
                 await session.flush()
                 session.add(version)
@@ -321,12 +379,16 @@ class DeckRepository:
     ) -> DeckVersionRecord:
         now = datetime.now(timezone.utc)
         async with self._database.session() as session:
-            async with _serialized_write(session):
+            dialect_name = session.bind.dialect.name if session.bind is not None else ""
+            async with _classified_write(
+                session,
+                sqlite_immediate=dialect_name == "sqlite",
+            ):
                 deck = await session.scalar(
                     _owned_deck_for_write(
                         deck_id,
                         owner_id,
-                        session.bind.dialect.name if session.bind is not None else "",
+                        dialect_name,
                     )
                 )
                 if deck is None:

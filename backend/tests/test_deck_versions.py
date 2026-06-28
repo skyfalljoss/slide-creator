@@ -9,6 +9,10 @@ import pytest
 
 from app.models.schemas import SlideData
 from app.services.platform.deck_repository import DeckRecord, DeckVersionRecord
+from app.services.platform.deck_repository import (
+    DeckCommitUncertainError,
+    DeckWriteRolledBackError,
+)
 from app.services.platform.deck_versions import DeckVersionService, VersionStorageConflictError
 from app.services.presentation.pptx_validation import InvalidPptxError, validate_pptx
 
@@ -126,7 +130,7 @@ class InitialRepository:
     def __init__(self, storage: FakeStorage) -> None:
         self.storage = storage
         self.kwargs: dict | None = None
-        self.error: Exception | None = None
+        self.error: BaseException | None = None
         self.committed: DeckRecord | None = None
         self.reconciliation_error: Exception | None = None
 
@@ -161,7 +165,7 @@ class VersionRepository:
         self.append_calls: list[dict] = []
         self.deleted_row_batches: list[list[str]] = []
         self.delete_rows_error: Exception | None = None
-        self.append_error: Exception | None = None
+        self.append_error: BaseException | None = None
         self.commit_before_append_error = False
         self.version_error: Exception | None = None
 
@@ -267,10 +271,12 @@ async def test_create_generated_deck_renders_uploads_then_creates_metadata():
 async def test_create_generated_deck_deletes_upload_when_metadata_fails():
     storage = FakeStorage()
     repository = InitialRepository(storage)
-    repository.error = RuntimeError("metadata failed")
+    repository.error = DeckWriteRolledBackError(
+        "metadata rolled back", RuntimeError("metadata failed")
+    )
     service = DeckVersionService(repository, storage, None, 50_000_000, 5)
 
-    with pytest.raises(RuntimeError, match="metadata failed"):
+    with pytest.raises(DeckWriteRolledBackError, match="rolled back"):
         await service.create_generated_deck(
             owner_id="owner-1",
             name="Deck",
@@ -289,10 +295,12 @@ async def test_create_generated_deck_preserves_metadata_error_when_cleanup_fails
     storage = FakeStorage()
     storage.delete_error = OSError("cleanup failed")
     repository = InitialRepository(storage)
-    repository.error = RuntimeError("metadata failed")
+    repository.error = DeckWriteRolledBackError(
+        "metadata rolled back", RuntimeError("metadata failed")
+    )
     service = DeckVersionService(repository, storage, None, 50_000_000, 5)
 
-    with pytest.raises(RuntimeError, match="metadata failed"):
+    with pytest.raises(DeckWriteRolledBackError, match="rolled back"):
         await service.create_generated_deck(
             owner_id="owner-1",
             name="Deck",
@@ -307,14 +315,18 @@ async def test_create_generated_deck_preserves_metadata_error_when_cleanup_fails
 async def test_create_generated_deck_returns_commit_after_repository_raises():
     storage = FakeStorage()
     repository = InitialRepository(storage)
-    repository.error = RuntimeError("commit acknowledgement failed")
+    repository.error = DeckCommitUncertainError(
+        "commit uncertain", RuntimeError("commit acknowledgement failed")
+    )
     original_create = repository.create_with_initial_version
 
     async def commit_then_raise(**kwargs):
         repository.error = None
         committed = await original_create(**kwargs)
         repository.committed = committed
-        repository.error = RuntimeError("commit acknowledgement failed")
+        repository.error = DeckCommitUncertainError(
+            "commit uncertain", RuntimeError("commit acknowledgement failed")
+        )
         raise repository.error
 
     repository.create_with_initial_version = commit_then_raise
@@ -338,12 +350,14 @@ async def test_create_generated_deck_returns_commit_after_repository_raises():
 async def test_create_generated_deck_preserves_object_when_reconciliation_fails():
     storage = FakeStorage()
     repository = InitialRepository(storage)
-    original_error = RuntimeError("metadata failed")
+    original_error = DeckCommitUncertainError(
+        "commit uncertain", RuntimeError("metadata failed")
+    )
     repository.error = original_error
     repository.reconciliation_error = OSError("database unavailable")
     service = DeckVersionService(repository, storage, None, 50_000_000, 5)
 
-    with pytest.raises(RuntimeError, match="metadata failed") as raised:
+    with pytest.raises(DeckCommitUncertainError, match="uncertain") as raised:
         await service.create_generated_deck(
             owner_id="owner-1",
             name="Deck",
@@ -484,7 +498,9 @@ async def test_save_edited_version_same_callback_different_content_has_distinct_
 async def test_save_edited_version_returns_commit_after_append_raises():
     current = version_record()
     repository = VersionRepository(deck_record(current))
-    repository.append_error = RuntimeError("commit acknowledgement failed")
+    repository.append_error = DeckCommitUncertainError(
+        "commit uncertain", RuntimeError("commit acknowledgement failed")
+    )
     repository.commit_before_append_error = True
     storage = FakeStorage()
     service = DeckVersionService(repository, storage, None, 50_000_000, 5)
@@ -507,13 +523,15 @@ async def test_save_edited_version_returns_commit_after_append_raises():
 async def test_save_edited_version_preserves_object_when_reconciliation_fails():
     current = version_record()
     repository = VersionRepository(deck_record(current))
-    original_error = RuntimeError("append failed")
+    original_error = DeckCommitUncertainError(
+        "commit uncertain", RuntimeError("append failed")
+    )
     repository.append_error = original_error
     repository.version_error = OSError("database unavailable")
     storage = FakeStorage()
     service = DeckVersionService(repository, storage, None, 50_000_000, 5)
 
-    with pytest.raises(RuntimeError, match="append failed") as raised:
+    with pytest.raises(DeckCommitUncertainError, match="uncertain") as raised:
         await service.save_edited_version(
             deck_id="deck-1",
             owner_id="owner-1",
@@ -532,12 +550,14 @@ async def test_save_edited_version_preserves_object_when_reconciliation_fails():
 async def test_save_edited_version_deletes_object_after_confirmed_rollback():
     current = version_record()
     repository = VersionRepository(deck_record(current))
-    original_error = RuntimeError("append rolled back")
+    original_error = DeckWriteRolledBackError(
+        "append rolled back", RuntimeError("append failed")
+    )
     repository.append_error = original_error
     storage = FakeStorage()
     service = DeckVersionService(repository, storage, None, 50_000_000, 5)
 
-    with pytest.raises(RuntimeError, match="append rolled back"):
+    with pytest.raises(DeckWriteRolledBackError, match="rolled back"):
         await service.save_edited_version(
             deck_id="deck-1",
             owner_id="owner-1",
@@ -549,6 +569,64 @@ async def test_save_edited_version_deletes_object_after_confirmed_rollback():
 
     assert storage.objects == {}
     assert storage.events[-1] == "delete"
+
+
+@pytest.mark.asyncio
+async def test_negative_reconciliation_never_proves_rollback():
+    current = version_record()
+    repository = VersionRepository(deck_record(current))
+    uncertain = DeckCommitUncertainError(
+        "commit uncertain", RuntimeError("connection lost")
+    )
+    repository.append_error = uncertain
+    storage = FakeStorage()
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    with pytest.raises(DeckCommitUncertainError) as raised:
+        await service.save_edited_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            content=pptx_bytes("delayed commit"),
+            base_version_id=current.id,
+            callback_key="callback-delayed",
+            created_by="editor",
+        )
+
+    assert raised.value is uncertain
+    call = repository.append_calls[0]
+    assert call["storage_key"] in storage.objects
+    delayed = version_record(
+        deck_id=call["deck_id"],
+        version_id=call["version_id"],
+        version_number=2,
+        storage_key=call["storage_key"],
+        sha256=call["sha256"],
+        source=call["source"],
+    )
+    repository.versions[delayed.id] = delayed
+    assert storage.objects[delayed.storage_key]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_append_preserves_uploaded_object():
+    current = version_record()
+    repository = VersionRepository(deck_record(current))
+    repository.append_error = asyncio.CancelledError()
+    storage = FakeStorage()
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.save_edited_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            content=pptx_bytes("cancelled append"),
+            base_version_id=current.id,
+            callback_key="callback-cancelled-append",
+            created_by="editor",
+        )
+
+    assert len(storage.objects) == 1
+    assert "delete" not in storage.events
 
 
 @pytest.mark.asyncio
