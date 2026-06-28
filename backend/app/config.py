@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     signed_url_expiry_minutes: int = 30
     deck_db_path: str = ".data/decks.db"
     database_url: str = "sqlite+aiosqlite:///.data/deck_versions.db"
+    local_deck_file_dir: str = ".data/deck-files"
     onlyoffice_enabled: bool = False
     onlyoffice_public_url: str = "http://localhost:8080"
     onlyoffice_internal_url: str = "http://onlyoffice"

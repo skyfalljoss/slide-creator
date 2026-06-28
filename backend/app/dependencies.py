@@ -12,6 +12,12 @@ from app.services.generation.gemini_api import GeminiApiService
 from app.services.platform.deck_store import DeckStore
 from app.services.platform.database import Database
 from app.services.platform.deck_repository import DeckRepository
+from app.services.platform.deck_files import (
+    DeckFileStorage,
+    GCSDeckFileStorage,
+    LocalDeckFileStorage,
+)
+from app.services.platform.deck_versions import DeckVersionService
 from app.services.presentation.pptx_preview import PptxPreviewService
 
 
@@ -70,6 +76,24 @@ def get_database() -> Database:
 @lru_cache
 def get_deck_repository() -> DeckRepository:
     return DeckRepository(get_database())
+
+
+@lru_cache
+def get_deck_file_storage() -> DeckFileStorage:
+    if settings.storage_provider == "gcs":
+        return GCSDeckFileStorage(settings.gcs_bucket)
+    return LocalDeckFileStorage(settings.local_deck_file_dir)
+
+
+@lru_cache
+def get_deck_version_service() -> DeckVersionService:
+    return DeckVersionService(
+        repository=get_deck_repository(),
+        storage=get_deck_file_storage(),
+        sample_template_path=settings.sample_template_path,
+        max_file_bytes=settings.onlyoffice_max_file_bytes,
+        retention=settings.deck_version_retention,
+    )
 
 
 _deck_store: DeckStore | None = None

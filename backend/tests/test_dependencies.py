@@ -1,8 +1,12 @@
+from unittest.mock import Mock
+
 import pytest
 
 from app.dependencies import (
     get_database,
+    get_deck_file_storage,
     get_deck_repository,
+    get_deck_version_service,
     get_generator_service,
     get_dlp_service,
     get_storage_service,
@@ -11,6 +15,8 @@ from app.dependencies import (
 )
 from app.config import settings
 from app.services.platform.deck_repository import DeckRepository
+from app.services.platform.deck_files import LocalDeckFileStorage
+from app.services.platform.deck_versions import DeckVersionService
 
 
 def test_get_generator_service_returns_local_by_default():
@@ -79,3 +85,49 @@ async def test_database_and_repository_are_cached_and_resettable(monkeypatch, tm
         get_deck_repository.cache_clear()
         get_database.cache_clear()
         await database.dispose()
+
+
+def test_get_deck_file_storage_returns_cached_local_storage(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "storage_provider", "local")
+    monkeypatch.setattr(settings, "local_deck_file_dir", str(tmp_path))
+    get_deck_file_storage.cache_clear()
+    try:
+        storage = get_deck_file_storage()
+        assert isinstance(storage, LocalDeckFileStorage)
+        assert storage.root == tmp_path
+        assert storage is get_deck_file_storage()
+    finally:
+        get_deck_file_storage.cache_clear()
+
+
+def test_get_deck_file_storage_selects_gcs_without_network(monkeypatch):
+    sentinel = object()
+    factory = Mock(return_value=sentinel)
+    monkeypatch.setattr(settings, "storage_provider", "gcs")
+    monkeypatch.setattr(settings, "gcs_bucket", "deck-bucket")
+    monkeypatch.setattr("app.dependencies.GCSDeckFileStorage", factory)
+    get_deck_file_storage.cache_clear()
+    try:
+        assert get_deck_file_storage() is sentinel
+        factory.assert_called_once_with("deck-bucket")
+    finally:
+        get_deck_file_storage.cache_clear()
+
+
+def test_get_deck_version_service_is_cached_and_uses_configured_dependencies(monkeypatch):
+    repository = object()
+    storage = object()
+    monkeypatch.setattr("app.dependencies.get_deck_repository", lambda: repository)
+    monkeypatch.setattr("app.dependencies.get_deck_file_storage", lambda: storage)
+    get_deck_version_service.cache_clear()
+    try:
+        service = get_deck_version_service()
+        assert isinstance(service, DeckVersionService)
+        assert service is get_deck_version_service()
+        assert service._repository is repository
+        assert service._storage is storage
+        assert service._sample_template_path == settings.sample_template_path
+        assert service._max_file_bytes == settings.onlyoffice_max_file_bytes
+        assert service._retention == settings.deck_version_retention
+    finally:
+        get_deck_version_service.cache_clear()

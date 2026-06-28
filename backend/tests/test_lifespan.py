@@ -28,6 +28,8 @@ async def test_lifespan_initializes_legacy_and_manages_new_resources(
     monkeypatch.setattr(dependencies, "get_deck_store", lambda: legacy_store)
     monkeypatch.setattr(dependencies, "get_http_client", lambda: http_client)
     monkeypatch.setattr(dependencies.get_deck_repository, "cache_clear", Mock())
+    monkeypatch.setattr(dependencies.get_deck_file_storage, "cache_clear", Mock())
+    monkeypatch.setattr(dependencies.get_deck_version_service, "cache_clear", Mock())
     monkeypatch.setattr(dependencies.get_database, "cache_clear", Mock(), raising=False)
     monkeypatch.setattr(dependencies.get_http_client, "cache_clear", Mock(), raising=False)
     monkeypatch.setattr("app.main.purge_local_temp_files", Mock())
@@ -38,6 +40,8 @@ async def test_lifespan_initializes_legacy_and_manages_new_resources(
 
     database.dispose.assert_awaited_once()
     http_client.aclose.assert_awaited_once()
+    dependencies.get_deck_file_storage.cache_clear.assert_called_once()
+    dependencies.get_deck_version_service.cache_clear.assert_called_once()
 
 
 async def test_lifespan_does_not_close_an_already_closed_http_client(monkeypatch):

@@ -13,6 +13,7 @@ def test_database_and_onlyoffice_defaults(monkeypatch):
         "ONLYOFFICE_JWT_SECRET",
         "ONLYOFFICE_FILE_TOKEN_TTL_SECONDS",
         "ONLYOFFICE_MAX_FILE_BYTES",
+        "LOCAL_DECK_FILE_DIR",
     ):
         monkeypatch.delenv(variable, raising=False)
 
@@ -22,6 +23,7 @@ def test_database_and_onlyoffice_defaults(monkeypatch):
     assert configured.onlyoffice_public_url == "http://localhost:8080"
     assert configured.onlyoffice_internal_url == "http://onlyoffice"
     assert configured.onlyoffice_max_file_bytes == 50_000_000
+    assert configured.local_deck_file_dir == ".data/deck-files"
 
 
 def test_onlyoffice_requires_jwt_secret_when_enabled(monkeypatch):
