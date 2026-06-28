@@ -1,7 +1,43 @@
 import pytest
 from pydantic import ValidationError
 
-from app.models.schemas import ChartAudit, ChartRecommendation, SlideContent, SlideData
+from app.models.schemas import (
+    ChartAudit,
+    ChartRecommendation,
+    GenerateResponse,
+    SlideContent,
+    SlideData,
+)
+
+
+def test_generate_response_serializes_editor_navigation_fields():
+    response = GenerateResponse(
+        session_id="session-123",
+        deck_id="deck-123",
+        editor_path="/editor/deck-123",
+        slides=[],
+    )
+
+    assert response.model_dump() == {
+        "session_id": "session-123",
+        "deck_id": "deck-123",
+        "editor_path": "/editor/deck-123",
+        "slides": [],
+    }
+
+
+@pytest.mark.parametrize("missing", ["deck_id", "editor_path"])
+def test_generate_response_requires_editor_navigation_fields(missing: str):
+    values = {
+        "session_id": "session-123",
+        "deck_id": "deck-123",
+        "editor_path": "/editor/deck-123",
+        "slides": [],
+    }
+    values.pop(missing)
+
+    with pytest.raises(ValidationError):
+        GenerateResponse.model_validate(values)
 
 
 def test_slide_data_accepts_chart_data_and_preserves_json_shape():

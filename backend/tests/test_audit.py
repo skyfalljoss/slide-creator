@@ -16,12 +16,14 @@ def test_audit_records_metadata_only():
     event = audit.record(
         action="generate",
         session_id="session-123",
+        deck_id="deck-123",
         deck_type="sales_9",
         slide_count=9,
     )
 
     assert event.action == "generate"
     assert event.session_id == "session-123"
+    assert event.deck_id == "deck-123"
     assert event.deck_type == "sales_9"
     assert event.slide_count == 9
     assert event.slide_index is None

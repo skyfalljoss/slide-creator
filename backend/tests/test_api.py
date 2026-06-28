@@ -16,6 +16,17 @@ from app import dependencies
 from app.routers.uploads import upload_file
 
 
+@pytest.fixture(autouse=True)
+def fake_generated_deck_persistence():
+    class FakeDeckVersionService:
+        async def create_generated_deck(self, **_kwargs):
+            return type("Deck", (), {"id": "test-deck-id"})()
+
+    app.dependency_overrides[dependencies.get_deck_version_service] = FakeDeckVersionService
+    yield
+    app.dependency_overrides.pop(dependencies.get_deck_version_service, None)
+
+
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app, raise_app_exceptions=False)

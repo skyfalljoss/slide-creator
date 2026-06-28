@@ -12,6 +12,7 @@ class AuditEvent(BaseModel):
 
     action: AuditAction
     session_id: str
+    deck_id: str | None = None
     deck_type: str
     slide_count: int
     slide_index: int | None = None
@@ -31,6 +32,7 @@ class AuditService:
         *,
         action: AuditAction,
         session_id: str,
+        deck_id: str | None = None,
         deck_type: str,
         slide_count: int,
         slide_index: int | None = None,
@@ -42,6 +44,7 @@ class AuditService:
         event = AuditEvent(
             action=action,
             session_id=session_id,
+            deck_id=deck_id,
             deck_type=deck_type,
             slide_count=slide_count,
             slide_index=slide_index,

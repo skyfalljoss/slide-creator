@@ -157,6 +157,8 @@ class SlideData(BaseModel):
 
 class GenerateResponse(BaseModel):
     session_id: str
+    deck_id: str
+    editor_path: str
     slides: list[SlideData]
 
 

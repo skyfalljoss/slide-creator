@@ -4,11 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from openpyxl.utils.exceptions import InvalidFileException
 
 from app.config import settings
-from app.dependencies import get_audit_service, get_dlp_service, get_generator_service, get_session_store
+from app.dependencies import (
+    get_audit_service,
+    get_deck_version_service,
+    get_dlp_service,
+    get_generator_service,
+    get_session_store,
+)
 from app.errors import DlpViolationError
 from app.middleware.rate_limit import limiter
 from app.models.schemas import GenerateRequest, GenerateResponse, SlideData
 from app.services.platform.auth import get_user_id
+from app.services.platform.deck_versions import DeckVersionService
 from app.services.generation.deck_normalizer import normalize_deck
 from app.services.generation.gemini_api import MAX_SCRIPT_SLIDES, SLIDE_COUNTS, SLIDE_COUNT_TOLERANCE
 from app.services.platform.session import SessionStore
@@ -32,6 +39,7 @@ async def generate(
     dlp: DlpService = Depends(get_dlp_service),
     gemini: GeminiService = Depends(get_generator_service),
     session_store: SessionStore = Depends(get_session_store),
+    deck_versions: DeckVersionService = Depends(get_deck_version_service),
 ) -> GenerateResponse:
     violations = dlp.scan_prompt(req.prompt)
     if violations:
@@ -57,18 +65,40 @@ async def generate(
         terms = sorted({term for item in flagged for term in item["violations"]})
         raise DlpViolationError(terms=terms)
 
+    user_id = get_user_id(request)
+    deck_type = req.deck_type or "unknown"
+    deck = await deck_versions.create_generated_deck(
+        owner_id=user_id,
+        name=_deck_name(slides),
+        deck_type=deck_type,
+        theme=req.theme,
+        aspect_ratio=req.aspect_ratio,
+        slides=slides,
+    )
     session_id = session_store.create(slides, req.deck_type, req.theme, req.aspect_ratio)
     audit = get_audit_service()
     audit.record(
         action="generate",
         session_id=session_id,
-        deck_type=req.deck_type or "unknown",
+        deck_id=deck.id,
+        deck_type=deck_type,
         slide_count=len(slides),
-        user_id=get_user_id(request),
+        user_id=user_id,
         model=settings.gemini_model,
     )
 
-    return GenerateResponse(session_id=session_id, slides=slides)
+    return GenerateResponse(
+        session_id=session_id,
+        deck_id=deck.id,
+        editor_path=f"/editor/{deck.id}",
+        slides=slides,
+    )
+
+
+def _deck_name(slides: list[SlideData]) -> str:
+    if not slides:
+        return "Untitled Deck"
+    return slides[0].title.strip()[:500] or "Untitled Deck"
 
 
 def _max_slide_count(req: GenerateRequest) -> int:
