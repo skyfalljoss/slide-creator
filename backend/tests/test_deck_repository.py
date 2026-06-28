@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import event, func, select, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -452,6 +452,66 @@ async def test_concurrent_sqlite_append_and_delete_have_consistent_outcome(
     assert await append_repo.get("deck-1", "owner-1") is None
 
 
+async def test_sqlite_append_commits_before_waiting_delete_returns_appended_key(
+    independent_repositories,
+    monkeypatch,
+):
+    append_repo, delete_repo = independent_repositories
+    await create_deck(append_repo)
+    appended_key = "decks/deck-1/version-appended-first.pptx"
+    append_flushed = asyncio.Event()
+    delete_attempted_begin = asyncio.Event()
+    release_append = asyncio.Event()
+    original_flush = AsyncSession.flush
+
+    async def pause_append_after_flush(self, *args, **kwargs):
+        await original_flush(self, *args, **kwargs)
+        if asyncio.current_task().get_name() == "append-first":
+            append_flushed.set()
+            await release_append.wait()
+
+    def notice_delete_begin(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.strip().upper() == "BEGIN IMMEDIATE":
+            delete_attempted_begin.set()
+
+    monkeypatch.setattr(AsyncSession, "flush", pause_append_after_flush)
+    delete_engine = delete_repo._database.engine.sync_engine
+    event.listen(delete_engine, "before_cursor_execute", notice_delete_begin)
+    try:
+        append_task = asyncio.create_task(
+            append_repo.append_version(
+                deck_id="deck-1",
+                owner_id="owner-1",
+                version_id="version-appended-first",
+                storage_key=appended_key,
+                sha256="e" * 64,
+                size_bytes=5,
+                source="edited",
+                created_by="owner-1",
+            ),
+            name="append-first",
+        )
+        await asyncio.wait_for(append_flushed.wait(), timeout=1)
+        delete_task = asyncio.create_task(
+            delete_repo.delete("deck-1", "owner-1"),
+            name="delete-second",
+        )
+        await asyncio.wait_for(delete_attempted_begin.wait(), timeout=1)
+        release_append.set()
+        appended, deleted_keys = await asyncio.gather(append_task, delete_task)
+    finally:
+        release_append.set()
+        event.remove(delete_engine, "before_cursor_execute", notice_delete_begin)
+
+    assert appended.storage_key == appended_key
+    assert set(deleted_keys) == {
+        "decks/deck-1/version-1.pptx",
+        appended_key,
+    }
+    assert await append_repo.get("deck-1", "owner-1") is None
+    assert await append_repo.all_storage_keys() == set()
+
+
 async def test_append_missing_or_cross_owner_deck_returns_missing(repository):
     repo, _database = repository
     await create_deck(repo)
@@ -494,6 +554,23 @@ async def test_stale_versions_and_protected_row_deletion(repository):
         "version-4",
         "version-3",
     ]
+
+
+async def test_delete_version_rows_reserves_sqlite_writer_before_reading(repository):
+    repo, database = repository
+    await create_deck(repo)
+    statements = []
+
+    def record_statement(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement.strip().upper())
+
+    event.listen(database.engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        await repo.delete_version_rows(["version-1"])
+    finally:
+        event.remove(database.engine.sync_engine, "before_cursor_execute", record_statement)
+
+    assert statements[0] == "BEGIN IMMEDIATE"
 
 
 async def test_all_storage_keys_spans_owners(repository):

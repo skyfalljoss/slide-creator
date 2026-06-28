@@ -406,7 +406,7 @@ class DeckRepository:
         if not version_ids:
             return
         async with self._database.session() as session:
-            async with session.begin():
+            async with _serialized_write(session):
                 current_ids = set(
                     await session.scalars(
                         select(DeckRow.current_version_id).where(
