@@ -1,6 +1,8 @@
 import pytest
 
 from app.dependencies import (
+    get_database,
+    get_deck_repository,
     get_generator_service,
     get_dlp_service,
     get_storage_service,
@@ -8,6 +10,7 @@ from app.dependencies import (
     get_audit_service,
 )
 from app.config import settings
+from app.services.platform.deck_repository import DeckRepository
 
 
 def test_get_generator_service_returns_local_by_default():
@@ -55,3 +58,24 @@ def test_get_generator_service_rejects_unknown_provider(monkeypatch):
     finally:
         monkeypatch.setattr(settings, "ai_provider", "local")
         get_generator_service.cache_clear()
+
+
+async def test_database_and_repository_are_cached_and_resettable(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{tmp_path / 'repository.db'}",
+    )
+    get_deck_repository.cache_clear()
+    get_database.cache_clear()
+    database = get_database()
+    try:
+        repository = get_deck_repository()
+        assert database is get_database()
+        assert repository is get_deck_repository()
+        assert isinstance(repository, DeckRepository)
+        assert repository._database is database
+    finally:
+        get_deck_repository.cache_clear()
+        get_database.cache_clear()
+        await database.dispose()

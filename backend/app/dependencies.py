@@ -10,6 +10,8 @@ from app.services.platform.storage import StorageService
 from app.services.generation.gemini import GeminiService
 from app.services.generation.gemini_api import GeminiApiService
 from app.services.platform.deck_store import DeckStore
+from app.services.platform.database import Database
+from app.services.platform.deck_repository import DeckRepository
 from app.services.presentation.pptx_preview import PptxPreviewService
 
 
@@ -58,6 +60,16 @@ def get_http_client() -> httpx.AsyncClient:
 
 def get_audit_service() -> AuditService:
     return _audit_service
+
+
+@lru_cache
+def get_database() -> Database:
+    return Database(settings.database_url)
+
+
+@lru_cache
+def get_deck_repository() -> DeckRepository:
+    return DeckRepository(get_database())
 
 
 _deck_store: DeckStore | None = None

@@ -44,12 +44,32 @@ def _configure_logging() -> None:
 async def lifespan(app: FastAPI):
     _configure_logging()
     _validate_config()
-    from app.dependencies import get_deck_store
-    await get_deck_store().initialize()
-    purge_local_temp_files()
-    yield
-    from app.dependencies import get_http_client
-    await get_http_client().aclose()
+    from app.dependencies import (
+        get_database,
+        get_deck_repository,
+        get_deck_store,
+        get_http_client,
+    )
+
+    database = get_database()
+    http_client = get_http_client()
+    try:
+        await get_deck_store().initialize()
+        if settings.database_url.startswith("sqlite"):
+            await database.create_schema()
+        purge_local_temp_files()
+        yield
+    finally:
+        try:
+            await database.dispose()
+        finally:
+            try:
+                if not http_client.is_closed:
+                    await http_client.aclose()
+            finally:
+                get_deck_repository.cache_clear()
+                get_database.cache_clear()
+                get_http_client.cache_clear()
 
 
 app = FastAPI(
