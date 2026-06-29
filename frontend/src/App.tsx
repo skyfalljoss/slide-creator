@@ -18,12 +18,12 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/editor/:deckId" element={<EditorPage />} />
             <Route element={<Layout />}>
               <Route path="/create" element={<CreatePage />} />
               <Route path="/preview" element={<PreviewPage />} />
               <Route path="/export" element={<ExportPage />} />
               <Route path="/my-decks" element={<MyDecksPage />} />
-              <Route path="/editor/:deckId" element={<EditorPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/create" replace />} />
           </Routes>

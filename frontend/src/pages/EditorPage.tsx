@@ -1,378 +1,274 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useParams } from 'react-router-dom'
+import { OnlyOfficeEditor } from '@/components/editor/OnlyOfficeEditor'
+import { VersionHistoryDialog } from '@/components/editor/VersionHistoryDialog'
 import { Button } from '@/components/ui/Button'
-import { cn } from '@/lib/utils'
-import { getDeck, getDeckSlidePreview, updateDeck, exportDeckById } from '@/lib/api'
-import { createEmptySlide } from '@/lib/canvas-bridge'
-import type { SlideData } from '@/types'
+import {
+  deckDownloadUrl,
+  getDeck,
+  getDeckStatus,
+  getEditorConfig,
+  renameDeck,
+} from '@/lib/api'
+
+type SaveState =
+  | { kind: 'clean' }
+  | { kind: 'dirty' }
+  | { kind: 'pending'; baselineVersion: number }
+  | { kind: 'confirmed'; version: number }
+  | { kind: 'error'; message: string }
+
+function queryErrorMessage(errors: unknown[]): string | null {
+  const error = errors.find(Boolean)
+  if (!error) return null
+  return error instanceof Error ? error.message : 'Unable to open this deck'
+}
 
 export function EditorPage() {
   const { deckId } = useParams<{ deckId: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const stageRef = useRef<HTMLDivElement>(null)
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const [deckName, setDeckName] = useState('')
-  const [deckNameInitialized, setDeckNameInitialized] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [isDirty, setIsDirty] = useState(false)
-  const [zoom, setZoom] = useState(100)
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [deckNameDraft, setDeckNameDraft] = useState<{ deckId: string; value: string } | null>(null)
+  const [renameError, setRenameError] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'clean' })
+  const [editorError, setEditorError] = useState<string | null>(null)
+  const [editorAttempt, setEditorAttempt] = useState(0)
+  const [versionsOpen, setVersionsOpen] = useState(false)
 
-  const { data: deck, isLoading } = useQuery({
+  const deckQuery = useQuery({
     queryKey: ['deck', deckId],
     queryFn: () => getDeck(deckId!),
-    enabled: !!deckId,
-  })
-
-  const { data: preview, isLoading: isPreviewLoading, error: previewError } = useQuery({
-    queryKey: ['deck-preview', deckId, selectedIndex + 1],
-    queryFn: () => getDeckSlidePreview(deckId!, selectedIndex + 1),
-    enabled: !!deckId && !!deck,
+    enabled: Boolean(deckId),
     retry: false,
   })
-
-  if (deck && !deckNameInitialized) {
-    setDeckName(deck.name)
-    setDeckNameInitialized(true)
-  }
-
-  const saveMutation = useMutation({
-    mutationFn: (data: { slides: SlideData[]; name?: string }) =>
-      updateDeck(deckId!, { slides: data.slides, name: data.name }),
-    onSuccess: () => {
-      setIsDirty(false)
-      void queryClient.invalidateQueries({ queryKey: ['deck-preview', deckId] })
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
+  const configQuery = useQuery({
+    queryKey: ['editor-config', deckId],
+    queryFn: () => getEditorConfig(deckId!),
+    enabled: Boolean(deckId),
+    retry: false,
   })
-
-  const exportMutation = useMutation({
-    mutationFn: () => exportDeckById(deckId!),
-    onSuccess: (data) => window.open(data.download_url, '_blank'),
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to export'),
+  const statusQuery = useQuery({
+    queryKey: ['deck-status', deckId],
+    queryFn: () => getDeckStatus(deckId!),
+    enabled: Boolean(deckId),
+    retry: false,
   })
-
-  const persistSlides = useCallback((slides: SlideData[]) => {
-    setIsDirty(true)
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
-    autoSaveTimer.current = setTimeout(() => {
-      saveMutation.mutate({ slides })
-    }, 3000)
-  }, [saveMutation])
+  const refetchStatus = statusQuery.refetch
 
   useEffect(() => {
-    const resizePreview = () => {
-      const parent = stageRef.current
-      if (!parent) return
-      if (parent.clientWidth === 0 || parent.clientHeight === 0) {
-        setZoom(100)
+    if (saveState.kind !== 'pending') return
+    let cancelled = false
+    let pollTimer: number | undefined
+    const poll = async () => {
+      const result = await refetchStatus()
+      if (cancelled) return
+      if (result.error) {
+        setSaveState({
+          kind: 'error',
+          message: result.error instanceof Error ? result.error.message : 'Save confirmation failed',
+        })
         return
       }
-      const scale = Math.min(
-        1,
-        (parent.clientWidth - 40) / 960,
-        (parent.clientHeight - 40) / 540,
-      )
-      setZoom(Math.round(scale * 100))
+      if (result.data && result.data.current_version_number > saveState.baselineVersion) {
+        setSaveState({ kind: 'confirmed', version: result.data.current_version_number })
+        return
+      }
+      pollTimer = window.setTimeout(poll, 1_000)
     }
-    resizePreview()
-    window.addEventListener('resize', resizePreview)
-
+    pollTimer = window.setTimeout(poll, 1_000)
+    const deadlineTimer = window.setTimeout(() => {
+      cancelled = true
+      if (pollTimer !== undefined) window.clearTimeout(pollTimer)
+      setSaveState({ kind: 'error', message: 'Save confirmation timed out' })
+    }, 30_000)
     return () => {
-      window.removeEventListener('resize', resizePreview)
+      cancelled = true
+      if (pollTimer !== undefined) window.clearTimeout(pollTimer)
+      window.clearTimeout(deadlineTimer)
     }
-  }, [])
+  }, [refetchStatus, saveState])
 
-  if (!deckId) return <div className="text-white p-8">No deck ID provided</div>
+  const navigationBlocked = saveState.kind === 'dirty' || saveState.kind === 'pending'
+  useEffect(() => {
+    if (!navigationBlocked) return
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [navigationBlocked])
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center py-20"><div className="animate-pulse text-white text-lg">Loading deck...</div></div>
+  const renameMutation = useMutation({
+    mutationFn: (name: string) => renameDeck(deckId!, name),
+    onSuccess: (updatedDeck) => {
+      queryClient.setQueryData(['deck', deckId], updatedDeck)
+      setDeckNameDraft({ deckId: deckId!, value: updatedDeck.name })
+      setRenameError(null)
+    },
+    onError: (error) => {
+      setRenameError(error instanceof Error ? error.message : 'Failed to rename deck')
+    },
+  })
+
+  const saveName = () => {
+    if (!deckQuery.data || renameMutation.isPending) return
+    const normalized = deckName.trim()
+    if (!normalized) {
+      setDeckNameDraft({ deckId: deckQuery.data.id, value: deckQuery.data.name })
+      setRenameError('Deck name is required')
+      return
+    }
+    if (normalized === deckQuery.data.name) {
+      setDeckNameDraft({ deckId: deckQuery.data.id, value: normalized })
+      return
+    }
+    renameMutation.mutate(normalized)
   }
 
-  if (!deck) {
+  const handleDirtyChange = useCallback((dirty: boolean) => {
+    if (dirty) {
+      setSaveState({ kind: 'dirty' })
+      return
+    }
+    setSaveState((current) => {
+      if (current.kind !== 'dirty') return current
+      return {
+        kind: 'pending',
+        baselineVersion: statusQuery.data?.current_version_number ?? 0,
+      }
+    })
+  }, [statusQuery.data?.current_version_number])
+
+  const handleEditorError = useCallback((message: string) => {
+    setEditorError(message)
+  }, [])
+
+  if (!deckId) {
+    return <FailureView message="No deck ID was provided" onBack={() => navigate('/my-decks')} />
+  }
+
+  const loading = deckQuery.isLoading || configQuery.isLoading || statusQuery.isLoading
+  if (loading) {
+    return <div className="grid h-screen place-items-center bg-slate-950 text-sm text-slate-300">Loading editor…</div>
+  }
+
+  const requestError = queryErrorMessage([deckQuery.error, configQuery.error, statusQuery.error])
+  if (requestError || !deckQuery.data || !configQuery.data || !statusQuery.data) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <h2 className="text-xl text-white">Deck not found</h2>
-        <Button variant="glow" className="mt-4" onClick={() => navigate('/my-decks')}>Back to My Decks</Button>
-      </div>
+      <FailureView
+        message={requestError ?? 'Unable to open this deck'}
+        onBack={() => navigate('/my-decks')}
+        onRetry={() => {
+          void Promise.all([deckQuery.refetch(), configQuery.refetch(), statusQuery.refetch()])
+        }}
+      />
     )
   }
 
-  const slides = deck.slides
-  const currentSlide = slides[selectedIndex] || slides[0]
-
-  const flushPendingSave = async (slidesToSave: SlideData[], name?: string) => {
-    if (autoSaveTimer.current) {
-      clearTimeout(autoSaveTimer.current)
-      autoSaveTimer.current = null
-    }
-    if (isDirty || name !== undefined) {
-      await saveMutation.mutateAsync({ slides: slidesToSave, name })
-    }
+  if (editorError) {
+    return (
+      <FailureView
+        message={editorError}
+        onBack={() => navigate('/my-decks')}
+        onRetry={() => {
+          setEditorError(null)
+          setEditorAttempt((attempt) => attempt + 1)
+        }}
+      />
+    )
   }
 
-  const handleSelectSlide = (index: number) => {
-    void flushPendingSave(slides)
-    setSelectedIndex(index)
-  }
-
-  const handleAddSlide = () => {
-    const newSlide = createEmptySlide(slides.length + 1)
-    const newSlides = [...slides, newSlide]
-    queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
-    saveMutation.mutate({ slides: newSlides })
-    setSelectedIndex(newSlides.length - 1)
-  }
-
-  const handleDeleteSlide = (index: number) => {
-    if (slides.length <= 1) return
-    const newSlides = slides.filter((_, i) => i !== index).map((s, i) => ({ ...s, index: i + 1 }))
-    queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
-    saveMutation.mutate({ slides: newSlides })
-    setSelectedIndex(Math.min(index, newSlides.length - 1))
-  }
-
-  const handleSaveName = () => {
-    if (deckName !== deck.name) {
-      saveMutation.mutate({ slides, name: deckName })
-    }
-  }
-
-  const handleExport = async () => {
-    try {
-      await flushPendingSave(slides, deckName !== deck.name ? deckName : undefined)
-      exportMutation.mutate()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save before export')
-    }
-  }
-
-  const setSlidesAndSchedule = (newSlides: SlideData[]) => {
-    queryClient.setQueryData(['deck', deckId], { ...deck, slides: newSlides })
-    persistSlides(newSlides)
-  }
-
-  const previewWidth = preview ? preview.width / 2 : 960
-  const previewHeight = preview ? preview.height / 2 : 540
-  const previewStyle = {
-    width: `${previewWidth * (zoom / 100)}px`,
-    height: `${previewHeight * (zoom / 100)}px`,
-  }
-  const previewMessage = previewError instanceof Error ? previewError.message : null
+  const currentStatus = statusQuery.data
+  const deckName = deckNameDraft?.deckId === deckId ? deckNameDraft.value : deckQuery.data.name
+  const statusText = saveState.kind === 'dirty'
+    ? 'Unsaved'
+    : saveState.kind === 'pending'
+      ? 'Saving…'
+      : saveState.kind === 'confirmed'
+        ? `Saved as version ${saveState.version}`
+        : saveState.kind === 'error'
+          ? saveState.message
+          : `Saved as version ${currentStatus.current_version_number}`
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] -mx-4 sm:-mx-6 lg:-mx-8 -mb-6">
-      <div className="flex items-center justify-between px-4 py-2 bg-citi-dark border-b border-white/10 shrink-0">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/my-decks')} className="text-slate-400 hover:text-white text-sm">← Back</button>
+    <div className="h-screen overflow-hidden bg-slate-950 text-slate-100">
+      <header className="flex h-12 items-center justify-between gap-3 border-b border-slate-700 bg-slate-900 px-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <button type="button" onClick={() => navigate('/my-decks')} className="shrink-0 rounded px-2 py-1 text-sm text-slate-300 hover:bg-slate-800 hover:text-white">← Back</button>
           <input
-            type="text"
+            aria-label="Deck name"
             value={deckName}
-            onChange={(e) => setDeckName(e.target.value)}
-            onBlur={handleSaveName}
-            onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
-            className="bg-transparent text-white font-semibold text-sm border-none outline-none focus:ring-1 focus:ring-citi-blue rounded px-2 py-0.5"
+            maxLength={500}
+            disabled={renameMutation.isPending}
+            onChange={(event) => setDeckNameDraft({ deckId, value: event.target.value })}
+            onBlur={saveName}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+              if (event.key === 'Escape') {
+                setDeckNameDraft({ deckId, value: deckQuery.data.name })
+                setRenameError(null)
+                event.currentTarget.blur()
+              }
+            }}
+            className="min-w-0 max-w-md flex-1 rounded border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none hover:border-slate-700 focus:border-blue-500 disabled:opacity-60"
           />
-          <span className="text-xs text-slate-500">Slide {selectedIndex + 1} of {slides.length}</span>
-          {isDirty && <span className="text-xs text-yellow-400">Unsaved changes</span>}
+          <span aria-live="polite" className={saveState.kind === 'error' ? 'shrink-0 text-xs text-red-300' : 'shrink-0 text-xs text-slate-400'}>{statusText}</span>
+          {renameError && <span role="alert" className="truncate text-xs text-red-300">{renameError}</span>}
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="border-white/15 bg-white/5 text-slate-200" onClick={handleSaveName}>Save</Button>
-          <Button size="sm" variant="glow" onClick={handleExport} disabled={exportMutation.isPending || saveMutation.isPending}>
-            {exportMutation.isPending ? 'Exporting...' : 'Export PPTX'}
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-1 min-h-0">
-        <div className="w-44 bg-citi-dark/50 border-r border-white/10 overflow-y-auto shrink-0">
-          <div className="p-2">
-            <div className="text-[10px] uppercase text-slate-500 font-semibold px-1 mb-2">Slides</div>
-            {slides.map((slide, i) => (
-              <button
-                key={slide.index}
-                onClick={() => handleSelectSlide(i)}
-                className={cn(
-                  'w-full text-left p-2 rounded mb-1 text-xs transition',
-                  selectedIndex === i
-                    ? 'bg-citi-blue/20 border border-citi-blue/50 text-white'
-                    : 'border border-transparent text-slate-400 hover:bg-white/5 hover:text-white',
-                )}
-              >
-                <div className="font-medium truncate">{slide.title}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">{slide.bullets.length} bullets</div>
-              </button>
-            ))}
-            <button
-              onClick={handleAddSlide}
-              className="w-full mt-2 py-1.5 rounded text-xs font-medium bg-citi-blue/20 text-citi-blue hover:bg-citi-blue/30 transition"
-            >
-              + Add Slide
-            </button>
-          </div>
-        </div>
-
-        <div ref={stageRef} className="flex-1 bg-slate-700 flex items-center justify-center relative overflow-hidden">
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-slate-800 rounded-lg px-2 py-1 z-10">
-            <button onClick={() => {
-              setZoom((current) => Math.max(10, Math.round(current * 0.8)))
-            }} className="text-white text-xs px-1">−</button>
-            <span className="text-white text-xs px-1">{zoom}%</span>
-            <button onClick={() => {
-              setZoom((current) => Math.min(200, Math.round(current * 1.25)))
-            }} className="text-white text-xs px-1">+</button>
-          </div>
-          <div className="shadow-2xl bg-slate-900">
-            {isPreviewLoading && (
-              <div className="grid place-items-center bg-slate-900 text-sm text-slate-300" style={previewStyle}>
-                Rendering PPTX preview...
-              </div>
-            )}
-            {previewMessage && (
-              <div className="grid place-items-center bg-slate-900 p-6 text-center text-sm text-amber-200" style={previewStyle}>
-                <div>
-                  <div className="font-semibold">Preview renderer unavailable</div>
-                  <div className="mt-2 text-xs text-amber-100/80">{previewMessage}</div>
-                </div>
-              </div>
-            )}
-            {preview && !previewMessage && (
-              <img
-                alt={`Slide ${selectedIndex + 1} preview`}
-                src={`data:image/png;base64,${preview.image_b64}`}
-                className="block max-w-none select-none"
-                draggable={false}
-                style={previewStyle}
-              />
-            )}
-          </div>
-        </div>
-
-        <div className="w-60 bg-citi-dark/50 border-l border-white/10 overflow-y-auto shrink-0 p-3">
-          <div className="text-[10px] uppercase text-slate-500 font-semibold mb-3">Properties</div>
-
-          {currentSlide && (
-            <div className="space-y-3">
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1">Title</label>
-                <input
-                  id="slide-title"
-                  type="text"
-                  aria-label="Title"
-                  value={currentSlide.title}
-                  onChange={(e) => {
-                    const newSlides = slides.map((s, i) =>
-                      i === selectedIndex ? { ...s, title: e.target.value } : s,
-                    )
-                    setSlidesAndSchedule(newSlides)
-                  }}
-                  className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1">Kicker</label>
-                <input
-                  type="text"
-                  value={currentSlide.kicker || ''}
-                  onChange={(e) => {
-                    const newSlides = slides.map((s, i) =>
-                      i === selectedIndex ? { ...s, kicker: e.target.value || null } : s,
-                    )
-                    setSlidesAndSchedule(newSlides)
-                  }}
-                  className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1">Layout</label>
-                <select
-                  value={currentSlide.layout}
-                  onChange={(e) => {
-                    const newSlides = slides.map((s, i) =>
-                      i === selectedIndex ? { ...s, layout: e.target.value } : s,
-                    )
-                    setSlidesAndSchedule(newSlides)
-                  }}
-                  className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
-                >
-                  <option value="title">Title</option>
-                  <option value="content">Content</option>
-                  <option value="chart">Chart</option>
-                  <option value="next_steps">Next Steps</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1">Bullet Points</label>
-                <div className="space-y-1">
-                  {currentSlide.bullets.map((b, bi) => (
-                    <input
-                      key={bi}
-                      type="text"
-                      value={b}
-                      onChange={(e) => {
-                        const newBullets = [...currentSlide.bullets]
-                        newBullets[bi] = e.target.value
-                        const newSlides = slides.map((s, i) =>
-                          i === selectedIndex ? { ...s, bullets: newBullets } : s,
-                        )
-                        setSlidesAndSchedule(newSlides)
-                      }}
-                      className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white"
-                    />
-                  ))}
-                  <button
-                    onClick={() => {
-                      const newSlides = slides.map((s, i) =>
-                        i === selectedIndex ? { ...s, bullets: [...s.bullets, ''] } : s,
-                      )
-                      setSlidesAndSchedule(newSlides)
-                    }}
-                    className="text-[10px] text-citi-blue hover:underline"
-                  >
-                    + Add bullet
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1">Speaker Notes</label>
-                <textarea
-                  value={currentSlide.notes || ''}
-                  onChange={(e) => {
-                    const newSlides = slides.map((s, i) =>
-                      i === selectedIndex ? { ...s, notes: e.target.value || '' } : s,
-                    )
-                    setSlidesAndSchedule(newSlides)
-                  }}
-                  rows={5}
-                  className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white resize-none"
-                />
-              </div>
-
-              {slides.length > 1 && (
-                <button
-                  onClick={() => handleDeleteSlide(selectedIndex)}
-                  className="text-xs text-red-400 hover:text-red-300 mt-2"
-                >
-                  Delete this slide
-                </button>
-              )}
-            </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" variant="outline" className="border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700" onClick={() => setVersionsOpen(true)}>Versions</Button>
+          {navigationBlocked ? (
+            <Button size="sm" disabled>Download</Button>
+          ) : (
+            <a href={deckDownloadUrl(deckId)} className="inline-flex h-8 items-center justify-center rounded-lg bg-citi-blue px-3 text-xs font-medium text-white hover:bg-[#045a92]">Download</a>
           )}
         </div>
-      </div>
+      </header>
 
-      {error && (
-        <div className="absolute bottom-4 right-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300 z-50">
-          {error}
-          <button onClick={() => setError(null)} className="ml-2 underline">Dismiss</button>
+      <main className="h-[calc(100vh-48px)]">
+        <OnlyOfficeEditor
+          key={`${currentStatus.current_version_id}:${editorAttempt}`}
+          documentServerUrl={configQuery.data.document_server_url}
+          config={configQuery.data.config}
+          onDirtyChange={handleDirtyChange}
+          onError={handleEditorError}
+        />
+      </main>
+
+      <VersionHistoryDialog
+        deckId={deckId}
+        currentVersionId={currentStatus.current_version_id}
+        open={versionsOpen}
+        onClose={() => setVersionsOpen(false)}
+        onRestored={(status) => {
+          setSaveState({ kind: 'confirmed', version: status.current_version_number })
+        }}
+      />
+    </div>
+  )
+}
+
+function FailureView({
+  message,
+  onBack,
+  onRetry,
+}: {
+  message: string
+  onBack: () => void
+  onRetry?: () => void
+}) {
+  return (
+    <div className="grid h-screen place-items-center bg-slate-950 p-6 text-slate-100">
+      <div className="max-w-md text-center">
+        <h1 className="text-xl font-semibold">Unable to open deck</h1>
+        <p className="mt-2 text-sm text-slate-400">{message}</p>
+        <div className="mt-5 flex justify-center gap-3">
+          <Button variant="outline" onClick={onBack}>Back</Button>
+          {onRetry && <Button onClick={onRetry}>Retry</Button>}
         </div>
-      )}
+      </div>
     </div>
   )
 }

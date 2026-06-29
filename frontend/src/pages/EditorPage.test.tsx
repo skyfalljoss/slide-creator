@@ -1,93 +1,308 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EditorPage } from './EditorPage'
-import { getDeck, getDeckSlidePreview, updateDeck, exportDeckById } from '@/lib/api'
+import {
+  getDeck,
+  getDeckStatus,
+  getEditorConfig,
+  listDeckVersions,
+  renameDeck,
+  restoreDeckVersion,
+} from '@/lib/api'
+import { loadOnlyOfficeApi } from '@/lib/onlyoffice'
+import type { OnlyOfficeDocsApi } from '@/lib/onlyoffice'
+import type { DeckDetail, DeckStatus } from '@/types'
 
 vi.mock('@/lib/api', () => ({
+  deckDownloadUrl: vi.fn((deckId: string) => `/api/v1/decks/${deckId}/download`),
   getDeck: vi.fn(),
-  getDeckSlidePreview: vi.fn(),
-  updateDeck: vi.fn(),
-  exportDeckById: vi.fn(),
+  getDeckStatus: vi.fn(),
+  getEditorConfig: vi.fn(),
+  listDeckVersions: vi.fn(),
+  renameDeck: vi.fn(),
+  restoreDeckVersion: vi.fn(),
 }))
 
+vi.mock('@/lib/onlyoffice', () => ({ loadOnlyOfficeApi: vi.fn() }))
+
+const deck: DeckDetail = {
+  id: 'deck-1',
+  name: 'Quarterly Review',
+  deck_type: 'internal_6',
+  theme: 'minimalist',
+  aspect_ratio: '16:9',
+  slides: [],
+  thumbnail_b64: null,
+  created_at: '2026-06-26T00:00:00Z',
+  updated_at: '2026-06-26T00:00:00Z',
+}
+
+const versionOne: DeckStatus = {
+  current_version_id: 'version-1',
+  current_version_number: 1,
+  updated_at: '2026-06-26T00:00:00Z',
+}
+
+let editorConfigs: Record<string, unknown>[]
+let editorElementIds: string[]
+let destroyEditor: ReturnType<typeof vi.fn>
+
 function renderEditor() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/editor/deck-1']}>
         <Routes>
           <Route path="/editor/:deckId" element={<EditorPage />} />
+          <Route path="/my-decks" element={<div>Deck library</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return { ...result, queryClient }
+}
+
+function documentStateHandler() {
+  return editorConfigs[editorConfigs.length - 1].events as {
+    onDocumentStateChange: (event: { data: boolean }) => void
+  }
 }
 
 describe('EditorPage', () => {
   beforeEach(() => {
-    vi.mocked(getDeck).mockReset()
-    vi.mocked(getDeckSlidePreview).mockReset()
-    vi.mocked(updateDeck).mockReset()
-    vi.mocked(exportDeckById).mockReset()
-    vi.mocked(getDeckSlidePreview).mockResolvedValue({
-      deck_id: 'deck-1',
-      slide_index: 1,
-      image_b64: 'UE5H',
-      width: 1920,
-      height: 1080,
-      updated_at: '2026-06-26T00:00:00Z',
+    editorConfigs = []
+    editorElementIds = []
+    destroyEditor = vi.fn()
+    vi.mocked(getDeck).mockReset().mockResolvedValue(deck)
+    vi.mocked(getEditorConfig).mockReset().mockResolvedValue({
+      document_server_url: 'http://onlyoffice.test',
+      config: { document: { title: deck.name }, editorConfig: { mode: 'edit' } },
     })
-    vi.mocked(updateDeck).mockResolvedValue({ updated_at: '2026-06-26T00:01:00Z' })
-    vi.mocked(exportDeckById).mockResolvedValue({ download_url: 'http://test/deck.pptx', expires_at: '2026-06-26T00:05:00Z' })
-    vi.spyOn(window, 'open').mockImplementation(() => null)
-    vi.mocked(getDeck).mockResolvedValue({
-      id: 'deck-1',
-      name: 'Editor Test Deck',
-      deck_type: 'sales_9',
-      theme: 'minimalist',
-      aspect_ratio: '16:9',
-      thumbnail_b64: null,
-      created_at: '2026-06-26T00:00:00Z',
-      updated_at: '2026-06-26T00:00:00Z',
-      slides: [
-        {
-          index: 1,
-          title: 'Editable Slide',
-          bullets: ['First point'],
-          notes: 'Speaker note',
-          layout: 'title',
-          chart_data: null,
-        },
-      ],
-    })
+    vi.mocked(getDeckStatus).mockReset().mockResolvedValue(versionOne)
+    vi.mocked(listDeckVersions).mockReset().mockResolvedValue({ versions: [] })
+    vi.mocked(renameDeck).mockReset().mockResolvedValue({ ...deck, name: 'Renamed deck' })
+    vi.mocked(restoreDeckVersion).mockReset()
+    vi.mocked(loadOnlyOfficeApi).mockReset().mockResolvedValue({
+      DocEditor: class {
+        constructor(elementId: string, config: Record<string, unknown>) {
+          editorElementIds.push(elementId)
+          editorConfigs.push(config)
+        }
+
+        destroyEditor = destroyEditor
+      },
+    } as unknown as OnlyOfficeDocsApi)
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
-  it('renders the editor with the backend PPTX preview image', async () => {
-    renderEditor()
+  it('hosts ONLYOFFICE with the backend configuration and destroys it on unmount', async () => {
+    const { unmount } = renderEditor()
 
-    expect(await screen.findByDisplayValue('Editor Test Deck')).toBeInTheDocument()
-    expect(screen.getByText('Slide 1 of 1')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('Editable Slide')).toBeInTheDocument()
-    expect(await screen.findByAltText('Slide 1 preview')).toHaveAttribute('src', 'data:image/png;base64,UE5H')
-    expect(getDeckSlidePreview).toHaveBeenCalledWith('deck-1', 1)
+    expect(await screen.findByDisplayValue('Quarterly Review')).toBeInTheDocument()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+    expect(editorConfigs[0]).toMatchObject({
+      document: { title: 'Quarterly Review' },
+      editorConfig: { mode: 'edit' },
+    })
+    expect(editorElementIds[0]).toMatch(/^onlyoffice-editor-/)
+
+    unmount()
+    expect(destroyEditor).toHaveBeenCalledTimes(1)
   })
 
-  it('flushes dirty slide changes before export', async () => {
+  it('moves from unsaved to pending and confirms the next persisted version', async () => {
+    vi.mocked(getDeckStatus)
+      .mockResolvedValueOnce(versionOne)
+      .mockResolvedValueOnce(versionOne)
+      .mockResolvedValue({
+        current_version_id: 'version-2',
+        current_version_number: 2,
+        updated_at: '2026-06-26T00:01:00Z',
+      })
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+    expect(screen.getByText('Unsaved')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled()
+
+    act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    expect(screen.getByText('Saving…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled()
+
+    await waitFor(() => expect(screen.getByText('Saved as version 2')).toBeInTheDocument(), {
+      timeout: 4_000,
+    })
+    expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
+      'href',
+      '/api/v1/decks/deck-1/download',
+    )
+  })
+
+  it('warns before unloading only while dirty or awaiting persistence', async () => {
+    vi.mocked(getDeckStatus).mockResolvedValueOnce(versionOne).mockResolvedValue({
+      current_version_id: 'version-2',
+      current_version_number: 2,
+      updated_at: '2026-06-26T00:01:00Z',
+    })
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+
+    const cleanEvent = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(cleanEvent)
+    expect(cleanEvent.defaultPrevented).toBe(false)
+
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+    const dirtyEvent = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(dirtyEvent)
+    expect(dirtyEvent.defaultPrevented).toBe(true)
+
+    act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    const pendingEvent = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(pendingEvent)
+    expect(pendingEvent.defaultPrevented).toBe(true)
+
+    await screen.findByText('Saved as version 2', {}, { timeout: 3_000 })
+    const savedEvent = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(savedEvent)
+    expect(savedEvent.defaultPrevented).toBe(false)
+  })
+
+  it('stops save polling after the 30 second hard limit', async () => {
+    vi.mocked(getDeckStatus).mockResolvedValue(versionOne)
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+    vi.useFakeTimers()
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+    act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+
+    expect(screen.getByText('Save confirmation timed out')).toBeInTheDocument()
+    const callsAtTimeout = vi.mocked(getDeckStatus).mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    expect(getDeckStatus).toHaveBeenCalledTimes(callsAtTimeout)
+  })
+
+  it('shows retry and back actions when editor configuration fails', async () => {
+    vi.mocked(getEditorConfig)
+      .mockRejectedValueOnce(new Error('Configuration unavailable'))
+      .mockResolvedValueOnce({
+        document_server_url: 'http://onlyoffice.test',
+        config: { document: { title: deck.name } },
+      })
     renderEditor()
 
-    expect(await screen.findByDisplayValue('Editor Test Deck')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Updated Slide' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Export PPTX' }))
+    expect(await screen.findByText('Configuration unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
 
-    await waitFor(() => expect(updateDeck).toHaveBeenCalledWith('deck-1', expect.objectContaining({
-      slides: [expect.objectContaining({ title: 'Updated Slide' })],
-    })))
-    await waitFor(() => expect(exportDeckById).toHaveBeenCalledWith('deck-1'))
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }))
+    expect(await screen.findByText('Deck library')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['deck', getDeck],
+    ['status', getDeckStatus],
+  ] as const)('shows a recoverable failure when the %s request fails', async (_name, request) => {
+    vi.mocked(request).mockRejectedValueOnce(new Error('Request unavailable'))
+    renderEditor()
+
+    expect(await screen.findByText('Request unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
+  })
+
+  it('renames the deck on blur and exposes a recoverable rename error', async () => {
+    vi.mocked(renameDeck)
+      .mockRejectedValueOnce(new Error('Name rejected'))
+      .mockResolvedValueOnce({ ...deck, name: 'Accepted name' })
+    renderEditor()
+    const nameInput = await screen.findByDisplayValue('Quarterly Review')
+
+    fireEvent.change(nameInput, { target: { value: 'Rejected name' } })
+    fireEvent.blur(nameInput)
+    expect(await screen.findByText('Name rejected')).toBeInTheDocument()
+
+    fireEvent.change(nameInput, { target: { value: 'Accepted name' } })
+    fireEvent.blur(nameInput)
+    await waitFor(() => expect(renameDeck).toHaveBeenLastCalledWith('deck-1', 'Accepted name'))
+    await waitFor(() => expect(screen.queryByText('Name rejected')).not.toBeInTheDocument())
+  })
+
+  it('lists versions newest first and requires confirmation before restore', async () => {
+    vi.mocked(listDeckVersions).mockResolvedValue({
+      versions: [
+        { id: 'version-1', version_number: 1, source: 'generated', created_by: 'user', created_at: '2026-06-26T00:00:00Z', size_bytes: 10, sha256: 'one' },
+        { id: 'version-3', version_number: 3, source: 'onlyoffice_save', created_by: 'user', created_at: '2026-06-26T00:02:00Z', size_bytes: 30, sha256: 'three' },
+        { id: 'version-2', version_number: 2, source: 'onlyoffice_save', created_by: 'user', created_at: '2026-06-26T00:01:00Z', size_bytes: 20, sha256: 'two' },
+      ],
+    })
+    vi.mocked(restoreDeckVersion).mockResolvedValue({
+      current_version_id: 'version-4',
+      current_version_number: 4,
+      updated_at: '2026-06-26T00:03:00Z',
+    })
+    vi.mocked(getDeckStatus)
+      .mockResolvedValueOnce({ ...versionOne, current_version_id: 'version-3', current_version_number: 3 })
+      .mockResolvedValue({
+        current_version_id: 'version-4',
+        current_version_number: 4,
+        updated_at: '2026-06-26T00:03:00Z',
+      })
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Versions' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Version history' })
+    const rows = await within(dialog).findAllByTestId('version-row')
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Version 3'),
+      expect.stringContaining('Version 2'),
+      expect.stringContaining('Version 1'),
+    ])
+
+    fireEvent.click(within(rows[2]).getByRole('button', { name: 'Restore version 1' }))
+    expect(restoreDeckVersion).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm restore version 1' }))
+
+    await waitFor(() => expect(restoreDeckVersion).toHaveBeenCalledWith('deck-1', 'version-1'))
+    await waitFor(() => expect(editorConfigs).toHaveLength(2))
+    expect(destroyEditor).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the version dialog open and reports restore failures', async () => {
+    vi.mocked(listDeckVersions).mockResolvedValue({
+      versions: [
+        { id: 'version-1', version_number: 1, source: 'generated', created_by: 'user', created_at: '2026-06-26T00:00:00Z', size_bytes: 10, sha256: 'one' },
+      ],
+    })
+    vi.mocked(restoreDeckVersion).mockRejectedValue(new Error('Restore failed'))
+    vi.mocked(getDeckStatus).mockResolvedValue({
+      current_version_id: 'version-2',
+      current_version_number: 2,
+      updated_at: '2026-06-26T00:01:00Z',
+    })
+    renderEditor()
+    fireEvent.click(await screen.findByRole('button', { name: 'Versions' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Version history' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Restore version 1' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm restore version 1' }))
+
+    expect(await within(dialog).findByText('Restore failed')).toBeInTheDocument()
+    expect(dialog).toBeInTheDocument()
   })
 })
