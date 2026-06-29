@@ -10,6 +10,7 @@ def test_database_and_onlyoffice_defaults(monkeypatch):
         "ONLYOFFICE_ENABLED",
         "ONLYOFFICE_PUBLIC_URL",
         "ONLYOFFICE_INTERNAL_URL",
+        "ONLYOFFICE_API_URL",
         "ONLYOFFICE_JWT_SECRET",
         "ONLYOFFICE_FILE_TOKEN_TTL_SECONDS",
         "ONLYOFFICE_MAX_FILE_BYTES",
@@ -22,6 +23,7 @@ def test_database_and_onlyoffice_defaults(monkeypatch):
     assert configured.database_url.startswith("sqlite+aiosqlite:///.data/deck_versions.db")
     assert configured.onlyoffice_public_url == "http://localhost:8080"
     assert configured.onlyoffice_internal_url == "http://onlyoffice"
+    assert configured.onlyoffice_api_url == "http://host.docker.internal:8000"
     assert configured.onlyoffice_max_file_bytes == 50_000_000
     assert configured.local_deck_file_dir == ".data/deck-files"
 

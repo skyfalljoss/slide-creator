@@ -30,6 +30,7 @@ async def test_lifespan_initializes_legacy_and_manages_new_resources(
     monkeypatch.setattr(dependencies.get_deck_repository, "cache_clear", Mock())
     monkeypatch.setattr(dependencies.get_deck_file_storage, "cache_clear", Mock())
     monkeypatch.setattr(dependencies.get_deck_version_service, "cache_clear", Mock())
+    monkeypatch.setattr(dependencies.get_onlyoffice_service, "cache_clear", Mock())
     monkeypatch.setattr(dependencies, "close_deck_file_storage", AsyncMock())
     monkeypatch.setattr(dependencies.get_database, "cache_clear", Mock(), raising=False)
     monkeypatch.setattr(dependencies.get_http_client, "cache_clear", Mock(), raising=False)
@@ -43,6 +44,7 @@ async def test_lifespan_initializes_legacy_and_manages_new_resources(
     http_client.aclose.assert_awaited_once()
     dependencies.get_deck_file_storage.cache_clear.assert_called_once()
     dependencies.get_deck_version_service.cache_clear.assert_called_once()
+    dependencies.get_onlyoffice_service.cache_clear.assert_called_once()
     dependencies.close_deck_file_storage.assert_awaited_once()
 
 

@@ -110,7 +110,7 @@ def get_deck_version_service() -> DeckVersionService:
 def get_onlyoffice_service() -> OnlyOfficeService:
     return OnlyOfficeService(
         public_url=settings.onlyoffice_public_url,
-        api_base_url=settings.api_base_url,
+        api_base_url=settings.onlyoffice_api_url,
         jwt_secret=settings.onlyoffice_jwt_secret,
         file_token_ttl_seconds=settings.onlyoffice_file_token_ttl_seconds,
     )

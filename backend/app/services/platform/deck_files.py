@@ -2,7 +2,7 @@ import asyncio
 import os
 import threading
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 from google.api_core.exceptions import NotFound, PreconditionFailed
 from google.cloud import storage as gcs
@@ -10,6 +10,16 @@ from google.cloud import storage as gcs
 from app.config import settings
 
 PPTX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+DECK_STREAM_CHUNK_SIZE = 256 * 1024
+_MAX_STREAM_CHUNK_SIZE = 1024 * 1024
+
+
+class DeckFileStream(Protocol):
+    @property
+    def closed(self) -> bool: ...
+    def __aiter__(self) -> "DeckFileStream": ...
+    async def __anext__(self) -> bytes: ...
+    async def aclose(self) -> None: ...
 
 
 class DeckFileStorage(Protocol):
@@ -18,6 +28,89 @@ class DeckFileStorage(Protocol):
     async def delete(self, key: str) -> None: ...
     async def exists(self, key: str) -> bool: ...
     async def list_keys(self, prefix: str) -> list[str]: ...
+    async def open_stream(
+        self, key: str, chunk_size: int = DECK_STREAM_CHUNK_SIZE
+    ) -> DeckFileStream: ...
+
+
+class _ThreadedDeckFileStream:
+    def __init__(
+        self,
+        handle: BinaryIO,
+        *,
+        first_chunk: bytes,
+        chunk_size: int,
+        key: str,
+        not_found_exceptions: tuple[type[BaseException], ...],
+    ) -> None:
+        self._handle = handle
+        self._first_chunk: bytes | None = first_chunk
+        self._chunk_size = chunk_size
+        self._key = key
+        self._not_found_exceptions = not_found_exceptions
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def __aiter__(self) -> "_ThreadedDeckFileStream":
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._closed:
+            raise StopAsyncIteration
+        if self._first_chunk is not None:
+            chunk = self._first_chunk
+            self._first_chunk = None
+        else:
+            try:
+                chunk = await asyncio.to_thread(self._handle.read, self._chunk_size)
+            except self._not_found_exceptions as exc:
+                await self.aclose()
+                raise FileNotFoundError(self._key) from exc
+            except BaseException:
+                await self.aclose()
+                raise
+        if chunk:
+            return chunk
+        await self.aclose()
+        raise StopAsyncIteration
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        await asyncio.to_thread(self._handle.close)
+
+
+def _validate_chunk_size(chunk_size: int) -> None:
+    if not 1 <= chunk_size <= _MAX_STREAM_CHUNK_SIZE:
+        raise ValueError("chunk_size must be between 1 byte and 1 MiB")
+
+
+async def _open_prefetched_stream(
+    *,
+    handle: BinaryIO,
+    key: str,
+    chunk_size: int,
+    not_found_exceptions: tuple[type[BaseException], ...] = (),
+) -> DeckFileStream:
+    try:
+        first_chunk = await asyncio.to_thread(handle.read, chunk_size)
+    except not_found_exceptions as exc:
+        await asyncio.to_thread(handle.close)
+        raise FileNotFoundError(key) from exc
+    except BaseException:
+        await asyncio.to_thread(handle.close)
+        raise
+    return _ThreadedDeckFileStream(
+        handle,
+        first_chunk=first_chunk,
+        chunk_size=chunk_size,
+        key=key,
+        not_found_exceptions=not_found_exceptions,
+    )
 
 
 def _normalize_key(key: str) -> str:
@@ -101,6 +194,22 @@ class LocalDeckFileStorage:
 
         return await asyncio.to_thread(read_bytes)
 
+    async def open_stream(
+        self, key: str, chunk_size: int = DECK_STREAM_CHUNK_SIZE
+    ) -> DeckFileStream:
+        normalized = _normalize_key(key)
+        _validate_chunk_size(chunk_size)
+
+        def open_file() -> BinaryIO:
+            return self._path_for(normalized).open("rb")
+
+        handle = await asyncio.to_thread(open_file)
+        return await _open_prefetched_stream(
+            handle=handle,
+            key=normalized,
+            chunk_size=chunk_size,
+        )
+
     async def delete(self, key: str) -> None:
         normalized = _normalize_key(key)
 
@@ -180,6 +289,23 @@ class GCSDeckFileStorage:
             return await asyncio.to_thread(blob.download_as_bytes)
         except NotFound as exc:
             raise FileNotFoundError(key) from exc
+
+    async def open_stream(
+        self, key: str, chunk_size: int = DECK_STREAM_CHUNK_SIZE
+    ) -> DeckFileStream:
+        normalized = _normalize_key(key)
+        _validate_chunk_size(chunk_size)
+        blob = self._bucket().blob(normalized)
+        try:
+            handle = await asyncio.to_thread(blob.open, "rb", chunk_size=chunk_size)
+        except NotFound as exc:
+            raise FileNotFoundError(normalized) from exc
+        return await _open_prefetched_stream(
+            handle=handle,
+            key=normalized,
+            chunk_size=chunk_size,
+            not_found_exceptions=(NotFound,),
+        )
 
     async def delete(self, key: str) -> None:
         blob = self._bucket().blob(_normalize_key(key))

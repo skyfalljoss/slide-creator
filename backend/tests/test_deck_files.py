@@ -38,6 +38,40 @@ async def test_local_storage_rejects_overwrite(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_local_storage_streams_bounded_chunks_and_closes(tmp_path: Path):
+    storage = LocalDeckFileStorage(tmp_path)
+    key = "decks/d1/versions/v1.pptx"
+    await storage.put(key, b"abcdefghij")
+
+    stream = await storage.open_stream(key, chunk_size=4)
+    chunks = [chunk async for chunk in stream]
+
+    assert chunks == [b"abcd", b"efgh", b"ij"]
+    assert stream.closed is True
+
+
+@pytest.mark.asyncio
+async def test_local_storage_stream_can_be_closed_before_eof(tmp_path: Path):
+    storage = LocalDeckFileStorage(tmp_path)
+    key = "decks/d1/versions/v1.pptx"
+    await storage.put(key, b"abcdefghij")
+
+    stream = await storage.open_stream(key, chunk_size=4)
+    assert await anext(stream) == b"abcd"
+    await stream.aclose()
+
+    assert stream.closed is True
+
+
+@pytest.mark.asyncio
+async def test_local_storage_stream_maps_missing_object(tmp_path: Path):
+    storage = LocalDeckFileStorage(tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        await storage.open_stream("decks/missing.pptx", chunk_size=4)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "key",
     ["", ".", "decks/", "../outside.pptx", "decks/../../outside.pptx", "/tmp/outside.pptx"],
@@ -194,6 +228,35 @@ async def test_gcs_read_translates_not_found(gcs_storage):
 
     with pytest.raises(FileNotFoundError):
         await storage.read("decks/missing.pptx")
+
+
+@pytest.mark.asyncio
+async def test_gcs_storage_streams_bounded_chunks_and_closes(gcs_storage):
+    storage, bucket = gcs_storage
+    handle = MagicMock()
+    handle.read.side_effect = [b"abcd", b"ef", b""]
+    bucket.blob.return_value.open.return_value = handle
+
+    stream = await storage.open_stream("decks/d1.pptx", chunk_size=4)
+    chunks = [chunk async for chunk in stream]
+
+    assert chunks == [b"abcd", b"ef"]
+    bucket.blob.return_value.open.assert_called_once_with("rb", chunk_size=4)
+    handle.close.assert_called_once_with()
+    assert stream.closed is True
+
+
+@pytest.mark.asyncio
+async def test_gcs_stream_translates_not_found_and_closes(gcs_storage):
+    storage, bucket = gcs_storage
+    handle = MagicMock()
+    handle.read.side_effect = NotFound("missing")
+    bucket.blob.return_value.open.return_value = handle
+
+    with pytest.raises(FileNotFoundError):
+        await storage.open_stream("decks/missing.pptx", chunk_size=4)
+
+    handle.close.assert_called_once_with()
 
 
 @pytest.mark.asyncio

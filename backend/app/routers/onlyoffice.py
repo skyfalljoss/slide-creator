@@ -1,5 +1,3 @@
-from collections.abc import AsyncIterator
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
@@ -10,7 +8,11 @@ from app.dependencies import (
 )
 from app.models.schemas import OnlyOfficeEditorConfig
 from app.services.platform.auth import get_user_id
-from app.services.platform.deck_files import DeckFileStorage, PPTX_CONTENT_TYPE
+from app.services.platform.deck_files import (
+    DECK_STREAM_CHUNK_SIZE,
+    DeckFileStorage,
+    PPTX_CONTENT_TYPE,
+)
 from app.services.platform.deck_repository import DeckRepository
 from app.services.platform.onlyoffice import OnlyOfficeService, OnlyOfficeTokenError
 
@@ -36,7 +38,6 @@ async def get_editor_config(
         deck=deck,
         user_id=user_id,
         user_name=user_name,
-        request_base_url=str(request.base_url),
     )
 
 
@@ -69,12 +70,19 @@ async def get_deck_content(
         raise HTTPException(status_code=401, detail="Invalid content token") from exc
 
     try:
-        content = await storage.read(deck.current_version.storage_key)
+        stream = await storage.open_stream(
+            deck.current_version.storage_key,
+            chunk_size=DECK_STREAM_CHUNK_SIZE,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Deck content not found") from exc
 
-    async def stream_content() -> AsyncIterator[bytes]:
-        yield content
+    async def stream_content():
+        try:
+            async for chunk in stream:
+                yield chunk
+        finally:
+            await stream.aclose()
 
     return StreamingResponse(
         stream_content(),

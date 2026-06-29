@@ -53,11 +53,35 @@ class FakeRepository:
 
 class FakeStorage:
     def __init__(self):
-        self.read_keys: list[str] = []
+        self.opened_keys: list[str] = []
+        self.requested_chunk_sizes: list[int] = []
+        self.closed = False
 
     async def read(self, key: str) -> bytes:
-        self.read_keys.append(key)
-        return PPTX_BYTES
+        raise AssertionError(f"content route must not buffer the whole object: {key}")
+
+    async def open_stream(self, key: str, chunk_size: int):
+        self.opened_keys.append(key)
+        self.requested_chunk_sizes.append(chunk_size)
+        storage = self
+
+        class Stream:
+            def __init__(self):
+                self._chunks = iter((b"PK\x03\x04", b"private-", b"presentation"))
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self._chunks)
+                except StopIteration as exc:
+                    raise StopAsyncIteration from exc
+
+            async def aclose(self):
+                storage.closed = True
+
+        return Stream()
 
 
 @pytest.fixture
@@ -106,7 +130,26 @@ async def test_owner_receives_editor_config_and_private_pptx(onlyoffice_client):
     assert content_response.headers["content-type"] == PPTX_CONTENT_TYPE
     assert content_response.headers["content-disposition"] == "inline; filename=deck.pptx"
     assert content_response.headers["cache-control"] == "private, no-store"
-    assert storage.read_keys == ["decks/deck-1/versions/version-1.pptx"]
+    assert storage.opened_keys == ["decks/deck-1/versions/version-1.pptx"]
+    assert storage.requested_chunk_sizes == [256 * 1024]
+    assert storage.closed is True
+
+
+@pytest.mark.asyncio
+async def test_editor_config_does_not_trust_host_header(onlyoffice_client):
+    client, _service, _storage = onlyoffice_client
+
+    response = await client.get(
+        "/api/v1/decks/deck-1/editor-config",
+        headers={"x-user-id": "alice", "host": "attacker.example"},
+    )
+
+    assert response.status_code == 200
+    config = response.json()["config"]
+    assert config["document"]["url"].startswith("http://api:8000/")
+    assert config["editorConfig"]["callbackUrl"].startswith("http://api:8000/")
+    assert "attacker.example" not in config["document"]["url"]
+    assert "attacker.example" not in config["editorConfig"]["callbackUrl"]
 
 
 @pytest.mark.asyncio
@@ -139,7 +182,7 @@ async def test_content_rejects_expired_token_before_storage_read(onlyoffice_clie
     response = await client.get(f"/api/v1/decks/deck-1/content?token={token}")
 
     assert response.status_code == 401
-    assert storage.read_keys == []
+    assert storage.opened_keys == []
 
 
 @pytest.mark.asyncio
@@ -165,4 +208,25 @@ async def test_content_rejects_wrong_token_scope_before_storage_read(
     response = await client.get(f"/api/v1/decks/deck-1/content?token={token}")
 
     assert response.status_code == 401
-    assert storage.read_keys == []
+    assert storage.opened_keys == []
+
+
+@pytest.mark.asyncio
+async def test_content_maps_missing_object_to_404(onlyoffice_client):
+    client, service, storage = onlyoffice_client
+
+    async def missing_stream(_key: str, chunk_size: int):
+        del chunk_size
+        raise FileNotFoundError("missing")
+
+    storage.open_stream = missing_stream
+    token = service.create_scoped_token(
+        subject="alice",
+        deck_id="deck-1",
+        version_id="version-1",
+        purpose="content",
+    )
+
+    response = await client.get(f"/api/v1/decks/deck-1/content?token={token}")
+
+    assert response.status_code == 404

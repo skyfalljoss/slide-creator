@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Literal
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import jwt
 
@@ -18,6 +18,32 @@ class OnlyOfficeTokenError(ValueError):
     """A scoped ONLYOFFICE token is invalid or does not match its resource."""
 
 
+class OnlyOfficeConfigurationError(ValueError):
+    """An ONLYOFFICE origin is missing or unsafe for signed configuration."""
+
+
+def _validated_http_origin(value: str, label: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise OnlyOfficeConfigurationError(f"ONLYOFFICE {label} is invalid") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or any(character.isspace() for character in value)
+    ):
+        raise OnlyOfficeConfigurationError(f"ONLYOFFICE {label} is invalid")
+    if port is not None and not 1 <= port <= 65535:
+        raise OnlyOfficeConfigurationError(f"ONLYOFFICE {label} is invalid")
+    return value.rstrip("/")
+
+
 class OnlyOfficeService:
     def __init__(
         self,
@@ -32,8 +58,8 @@ class OnlyOfficeService:
             raise ValueError("ONLYOFFICE JWT secret must not be empty")
         if file_token_ttl_seconds <= 0:
             raise ValueError("ONLYOFFICE token lifetime must be positive")
-        self._public_url = public_url.rstrip("/")
-        self._api_base_url = api_base_url.rstrip("/")
+        self._public_url = public_url
+        self._api_base_url = api_base_url
         self._jwt_secret = jwt_secret
         self._file_token_ttl_seconds = file_token_ttl_seconds
         self._now = now or (lambda: datetime.now(timezone.utc))
@@ -115,7 +141,6 @@ class OnlyOfficeService:
         deck: DeckRecord,
         user_id: str,
         user_name: str,
-        request_base_url: str = "",
     ) -> OnlyOfficeEditorConfig:
         version = deck.current_version
         if version is None or deck.current_version_id != version.id:
@@ -133,7 +158,8 @@ class OnlyOfficeService:
             version_id=version.id,
             purpose="callback",
         )
-        api_base_url = self._api_base_url or request_base_url.rstrip("/")
+        public_url = _validated_http_origin(self._public_url, "public URL")
+        api_base_url = _validated_http_origin(self._api_base_url, "API URL")
         content_url = self._resource_url(
             api_base_url, deck.id, "content", content_token
         )
@@ -160,7 +186,7 @@ class OnlyOfficeService:
             config, self._jwt_secret, algorithm=_TOKEN_ALGORITHM
         )
         return OnlyOfficeEditorConfig(
-            document_server_url=self._public_url,
+            document_server_url=public_url,
             config=config,
         )
 

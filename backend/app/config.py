@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     onlyoffice_enabled: bool = False
     onlyoffice_public_url: str = "http://localhost:8080"
     onlyoffice_internal_url: str = "http://onlyoffice"
+    onlyoffice_api_url: str = "http://host.docker.internal:8000"
     onlyoffice_jwt_secret: str = ""
     onlyoffice_file_token_ttl_seconds: int = Field(default=300, gt=0)
     onlyoffice_max_file_bytes: int = Field(

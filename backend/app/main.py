@@ -50,6 +50,7 @@ async def lifespan(app: FastAPI):
         get_deck_file_storage,
         get_deck_repository,
         get_deck_version_service,
+        get_onlyoffice_service,
         get_deck_store,
         get_http_client,
     )
@@ -83,6 +84,7 @@ async def lifespan(app: FastAPI):
             get_deck_version_service.cache_clear,
             get_deck_file_storage.cache_clear,
             get_deck_repository.cache_clear,
+            get_onlyoffice_service.cache_clear,
             get_database.cache_clear,
             get_http_client.cache_clear,
         ):
