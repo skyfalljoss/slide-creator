@@ -33,6 +33,10 @@ class OnlyOfficeDownloadError(ValueError):
     """An ONLYOFFICE callback file could not be downloaded safely."""
 
 
+class OnlyOfficeUnavailableError(RuntimeError):
+    """ONLYOFFICE integration is disabled."""
+
+
 def _validated_http_origin(value: str, label: str) -> str:
     try:
         parsed = urlsplit(value)
@@ -65,33 +69,40 @@ class OnlyOfficeService:
         file_token_ttl_seconds: int,
         internal_url: str = "http://onlyoffice",
         max_file_bytes: int = 50_000_000,
-        authorization_enabled: bool = False,
+        enabled: bool = True,
         download_client: httpx.AsyncClient | None = None,
+        download_deadline_seconds: float = 20.0,
         now: Callable[[], datetime] | None = None,
     ) -> None:
-        if not jwt_secret:
+        if enabled and not jwt_secret:
             raise ValueError("ONLYOFFICE JWT secret must not be empty")
         if file_token_ttl_seconds <= 0:
             raise ValueError("ONLYOFFICE token lifetime must be positive")
         if max_file_bytes <= 0:
             raise ValueError("ONLYOFFICE maximum file size must be positive")
+        if download_deadline_seconds <= 0:
+            raise ValueError("ONLYOFFICE download deadline must be positive")
         self._public_url = public_url
         self._api_base_url = api_base_url
         self._internal_url = _validated_http_origin(internal_url, "internal URL")
         self._jwt_secret = jwt_secret
         self._file_token_ttl_seconds = file_token_ttl_seconds
         self._max_file_bytes = max_file_bytes
-        self._authorization_enabled = authorization_enabled
+        self._enabled = enabled
         self._download_client = download_client
+        self._download_deadline_seconds = download_deadline_seconds
         self._now = now or (lambda: datetime.now(timezone.utc))
+
+    def ensure_enabled(self) -> None:
+        if not self._enabled:
+            raise OnlyOfficeUnavailableError("ONLYOFFICE integration is disabled")
 
     def validate_callback_authorization(
         self,
         authorization: str | None,
         callback: OnlyOfficeCallback,
     ) -> None:
-        if not self._authorization_enabled:
-            return
+        self.ensure_enabled()
         scheme, _, token = (authorization or "").partition(" ")
         if scheme.lower() != "bearer" or not token:
             raise OnlyOfficeAuthorizationError("ONLYOFFICE authorization is missing")
@@ -119,43 +130,47 @@ class OnlyOfficeService:
             )
 
     async def download_callback_file(self, url: str) -> bytes:
+        self.ensure_enabled()
         if self._download_client is None:
             raise OnlyOfficeDownloadError("ONLYOFFICE download client is unavailable")
         self._validate_download_url(url)
         try:
-            async with self._download_client.stream(
-                "GET",
-                url,
-                follow_redirects=False,
-                timeout=httpx.Timeout(15.0, connect=5.0),
-            ) as response:
-                if response.is_redirect:
-                    raise OnlyOfficeDownloadError(
-                        "ONLYOFFICE download redirects are forbidden"
-                    )
-                if not response.is_success:
-                    raise OnlyOfficeDownloadError("ONLYOFFICE download failed")
-                content_length = response.headers.get("content-length")
-                if content_length is not None:
-                    try:
-                        declared_size = int(content_length)
-                    except ValueError as exc:
+            async with asyncio.timeout(self._download_deadline_seconds):
+                async with self._download_client.stream(
+                    "GET",
+                    url,
+                    follow_redirects=False,
+                    timeout=httpx.Timeout(15.0, connect=5.0),
+                ) as response:
+                    if response.is_redirect:
                         raise OnlyOfficeDownloadError(
-                            "ONLYOFFICE download size is invalid"
-                        ) from exc
-                    if declared_size < 0 or declared_size > self._max_file_bytes:
-                        raise OnlyOfficeDownloadError(
-                            "ONLYOFFICE download exceeds maximum size"
+                            "ONLYOFFICE download redirects are forbidden"
                         )
-                chunks: list[bytes] = []
-                size = 0
-                async for chunk in response.aiter_bytes():
-                    size += len(chunk)
-                    if size > self._max_file_bytes:
-                        raise OnlyOfficeDownloadError(
-                            "ONLYOFFICE download exceeds maximum size"
-                        )
-                    chunks.append(chunk)
+                    if not response.is_success:
+                        raise OnlyOfficeDownloadError("ONLYOFFICE download failed")
+                    content_length = response.headers.get("content-length")
+                    if content_length is not None:
+                        try:
+                            declared_size = int(content_length)
+                        except ValueError as exc:
+                            raise OnlyOfficeDownloadError(
+                                "ONLYOFFICE download size is invalid"
+                            ) from exc
+                        if declared_size < 0 or declared_size > self._max_file_bytes:
+                            raise OnlyOfficeDownloadError(
+                                "ONLYOFFICE download exceeds maximum size"
+                            )
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > self._max_file_bytes:
+                            raise OnlyOfficeDownloadError(
+                                "ONLYOFFICE download exceeds maximum size"
+                            )
+                        chunks.append(chunk)
+        except TimeoutError as exc:
+            raise OnlyOfficeDownloadError("ONLYOFFICE download timed out") from exc
         except OnlyOfficeDownloadError:
             raise
         except httpx.HTTPError as exc:
@@ -200,6 +215,7 @@ class OnlyOfficeService:
         version_id: str,
         purpose: TokenPurpose,
     ) -> str:
+        self.ensure_enabled()
         if purpose not in {"content", "callback"}:
             raise ValueError("Unsupported ONLYOFFICE token purpose")
         if not subject or not deck_id or not version_id:
@@ -226,6 +242,7 @@ class OnlyOfficeService:
         version_id: str | None = None,
         subject: str | None = None,
     ) -> dict[str, str | int]:
+        self.ensure_enabled()
         try:
             claims = jwt.decode(
                 token,
@@ -270,6 +287,7 @@ class OnlyOfficeService:
         user_id: str,
         user_name: str,
     ) -> OnlyOfficeEditorConfig:
+        self.ensure_enabled()
         version = deck.current_version
         if version is None or deck.current_version_id != version.id:
             raise ValueError("Deck does not have a current version")

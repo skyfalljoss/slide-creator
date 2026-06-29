@@ -24,11 +24,19 @@ from app.services.platform.onlyoffice import (
     OnlyOfficeAuthorizationError,
     OnlyOfficeService,
     OnlyOfficeTokenError,
+    OnlyOfficeUnavailableError,
 )
 
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
+
+
+def _require_onlyoffice(onlyoffice: OnlyOfficeService) -> None:
+    try:
+        onlyoffice.ensure_enabled()
+    except OnlyOfficeUnavailableError as exc:
+        raise HTTPException(status_code=404, detail="Not found") from exc
 
 
 class _DeckStreamingResponse(StreamingResponse):
@@ -52,6 +60,7 @@ async def get_editor_config(
     repository: DeckRepository = Depends(get_deck_repository),
     onlyoffice: OnlyOfficeService = Depends(get_onlyoffice_service),
 ) -> OnlyOfficeEditorConfig:
+    _require_onlyoffice(onlyoffice)
     user_id = get_user_id(request)
     deck = await repository.get(deck_id, user_id)
     if deck is None or deck.current_version is None:
@@ -72,6 +81,7 @@ async def get_deck_content(
     storage: DeckFileStorage = Depends(get_deck_file_storage),
     onlyoffice: OnlyOfficeService = Depends(get_onlyoffice_service),
 ) -> StreamingResponse:
+    _require_onlyoffice(onlyoffice)
     try:
         claims = onlyoffice.decode_scoped_token(
             token,
@@ -124,6 +134,7 @@ async def handle_onlyoffice_callback(
     onlyoffice: OnlyOfficeService = Depends(get_onlyoffice_service),
     versions: DeckVersionService = Depends(get_deck_version_service),
 ) -> dict[str, int]:
+    _require_onlyoffice(onlyoffice)
     try:
         claims = onlyoffice.decode_scoped_token(
             token,
@@ -134,6 +145,10 @@ async def handle_onlyoffice_callback(
     except (OnlyOfficeTokenError, OnlyOfficeAuthorizationError) as exc:
         raise HTTPException(status_code=401, detail="Invalid callback authentication") from exc
 
+    base_version_id = str(claims["version_id"])
+    if body.key != f"{deck_id}-{base_version_id}":
+        return {"error": 1}
+
     if body.status in {1, 4}:
         return {"error": 0}
     if body.status in {3, 7}:
@@ -142,7 +157,6 @@ async def handle_onlyoffice_callback(
         return {"error": 1}
 
     owner_id = str(claims["sub"])
-    base_version_id = str(claims["version_id"])
     try:
         content = await onlyoffice.download_callback_file(body.url)
         await versions.save_edited_version(
