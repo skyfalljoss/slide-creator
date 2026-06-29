@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { OnlyOfficeEditor } from '@/components/editor/OnlyOfficeEditor'
@@ -14,7 +14,7 @@ import {
 
 type SaveState =
   | { kind: 'clean' }
-  | { kind: 'dirty' }
+  | { kind: 'dirty'; baselineVersion: number }
   | { kind: 'pending'; baselineVersion: number }
   | { kind: 'confirmed'; version: number }
   | { kind: 'error'; message: string }
@@ -35,6 +35,11 @@ export function EditorPage() {
   const [editorError, setEditorError] = useState<string | null>(null)
   const [editorAttempt, setEditorAttempt] = useState(0)
   const [versionsOpen, setVersionsOpen] = useState(false)
+  const [isRestoring, setIsRestoring] = useState(false)
+  const [discardTarget, setDiscardTarget] = useState<'back' | 'history' | null>(null)
+  const cancelRenameRef = useRef(false)
+  const renameSubmissionRef = useRef<string | null>(null)
+  const historyGuardRef = useRef(false)
 
   const deckQuery = useQuery({
     queryKey: ['deck', deckId],
@@ -89,7 +94,10 @@ export function EditorPage() {
     }
   }, [refetchStatus, saveState])
 
-  const navigationBlocked = saveState.kind === 'dirty' || saveState.kind === 'pending'
+  const navigationBlocked = saveState.kind === 'dirty'
+    || saveState.kind === 'pending'
+    || saveState.kind === 'error'
+    || isRestoring
   useEffect(() => {
     if (!navigationBlocked) return
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -100,19 +108,47 @@ export function EditorPage() {
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
   }, [navigationBlocked])
 
+  useEffect(() => {
+    if (!navigationBlocked || !deckId) return
+    const guardState = { ...window.history.state, slideForgeEditorGuard: deckId }
+    if (!historyGuardRef.current) {
+      window.history.pushState(guardState, '', window.location.href)
+      historyGuardRef.current = true
+    }
+    const onPopState = () => {
+      window.history.pushState(guardState, '', window.location.href)
+      historyGuardRef.current = true
+      setDiscardTarget('history')
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [deckId, navigationBlocked])
+
+  useEffect(() => {
+    if (navigationBlocked || !historyGuardRef.current) return
+    historyGuardRef.current = false
+    if (window.history.state?.slideForgeEditorGuard) window.history.back()
+  }, [navigationBlocked])
+
   const renameMutation = useMutation({
     mutationFn: (name: string) => renameDeck(deckId!, name),
     onSuccess: (updatedDeck) => {
       queryClient.setQueryData(['deck', deckId], updatedDeck)
       setDeckNameDraft({ deckId: deckId!, value: updatedDeck.name })
       setRenameError(null)
+      renameSubmissionRef.current = null
     },
     onError: (error) => {
       setRenameError(error instanceof Error ? error.message : 'Failed to rename deck')
+      renameSubmissionRef.current = null
     },
   })
 
   const saveName = () => {
+    if (cancelRenameRef.current) {
+      cancelRenameRef.current = false
+      return
+    }
     if (!deckQuery.data || renameMutation.isPending) return
     const normalized = deckName.trim()
     if (!normalized) {
@@ -124,26 +160,77 @@ export function EditorPage() {
       setDeckNameDraft({ deckId: deckQuery.data.id, value: normalized })
       return
     }
+    if (renameSubmissionRef.current === normalized) return
+    renameSubmissionRef.current = normalized
     renameMutation.mutate(normalized)
   }
 
   const handleDirtyChange = useCallback((dirty: boolean) => {
+    const observedVersion = queryClient.getQueryData<{ current_version_number: number }>(
+      ['deck-status', deckId],
+    )?.current_version_number ?? 0
     if (dirty) {
-      setSaveState({ kind: 'dirty' })
+      setSaveState((current) => {
+        if (current.kind === 'dirty') return current
+        if (current.kind === 'pending' && observedVersion <= current.baselineVersion) {
+          return { kind: 'dirty', baselineVersion: current.baselineVersion + 1 }
+        }
+        return { kind: 'dirty', baselineVersion: observedVersion }
+      })
       return
     }
     setSaveState((current) => {
       if (current.kind !== 'dirty') return current
+      if (observedVersion > current.baselineVersion) {
+        return { kind: 'confirmed', version: observedVersion }
+      }
       return {
         kind: 'pending',
-        baselineVersion: statusQuery.data?.current_version_number ?? 0,
+        baselineVersion: current.baselineVersion,
       }
     })
-  }, [statusQuery.data?.current_version_number])
+  }, [deckId, queryClient])
 
   const handleEditorError = useCallback((message: string) => {
     setEditorError(message)
   }, [])
+
+  const requestBack = () => {
+    if (navigationBlocked) {
+      setDiscardTarget('back')
+    } else {
+      navigate('/my-decks')
+    }
+  }
+
+  const retryAfterRestore = () => {
+    if (!deckId) return
+    void Promise.all([
+      queryClient.refetchQueries({ queryKey: ['deck', deckId], exact: true, type: 'all' }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ['editor-config', deckId], exact: true, type: 'all' }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ['deck-status', deckId], exact: true, type: 'all' }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ['deck-versions', deckId], exact: true, type: 'all' }, { throwOnError: true }),
+    ]).then(() => {
+      setEditorError(null)
+      setIsRestoring(false)
+    }).catch((error: unknown) => {
+      setEditorError(`Restored, but failed to refresh the editor: ${error instanceof Error ? error.message : 'Refresh failed'}`)
+    })
+  }
+
+  const discardDialog = (
+    <DiscardChangesDialog
+      open={discardTarget !== null}
+      onCancel={() => setDiscardTarget(null)}
+      onDiscard={() => {
+        const target = discardTarget
+        historyGuardRef.current = false
+        setDiscardTarget(null)
+        if (target === 'history') navigate(-2)
+        else navigate('/my-decks')
+      }}
+    />
+  )
 
   if (!deckId) {
     return <FailureView message="No deck ID was provided" onBack={() => navigate('/my-decks')} />
@@ -157,26 +244,36 @@ export function EditorPage() {
   const requestError = queryErrorMessage([deckQuery.error, configQuery.error, statusQuery.error])
   if (requestError || !deckQuery.data || !configQuery.data || !statusQuery.data) {
     return (
-      <FailureView
-        message={requestError ?? 'Unable to open this deck'}
-        onBack={() => navigate('/my-decks')}
-        onRetry={() => {
-          void Promise.all([deckQuery.refetch(), configQuery.refetch(), statusQuery.refetch()])
-        }}
-      />
+      <>
+        <FailureView
+          message={requestError ?? 'Unable to open this deck'}
+          onBack={requestBack}
+          onRetry={() => {
+            if (isRestoring) retryAfterRestore()
+            else void Promise.all([deckQuery.refetch(), configQuery.refetch(), statusQuery.refetch()])
+          }}
+        />
+        {discardDialog}
+      </>
     )
   }
 
   if (editorError) {
     return (
-      <FailureView
-        message={editorError}
-        onBack={() => navigate('/my-decks')}
-        onRetry={() => {
-          setEditorError(null)
-          setEditorAttempt((attempt) => attempt + 1)
-        }}
-      />
+      <>
+        <FailureView
+          message={editorError}
+          onBack={requestBack}
+          onRetry={() => {
+            if (isRestoring) retryAfterRestore()
+            else {
+              setEditorError(null)
+              setEditorAttempt((attempt) => attempt + 1)
+            }
+          }}
+        />
+        {discardDialog}
+      </>
     )
   }
 
@@ -194,19 +291,26 @@ export function EditorPage() {
 
   return (
     <div className="h-screen overflow-hidden bg-slate-950 text-slate-100">
-      <header className="flex h-12 items-center justify-between gap-3 border-b border-slate-700 bg-slate-900 px-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <button type="button" onClick={() => navigate('/my-decks')} className="shrink-0 rounded px-2 py-1 text-sm text-slate-300 hover:bg-slate-800 hover:text-white">← Back</button>
+      <header className="flex h-12 items-center justify-between gap-3 overflow-x-auto border-b border-slate-700 bg-slate-900 px-3">
+        <div className="flex min-w-[20rem] flex-1 items-center gap-2 sm:gap-3">
+          <button type="button" onClick={requestBack} className="shrink-0 rounded px-2 py-1 text-sm text-slate-300 hover:bg-slate-800 hover:text-white">← Back</button>
           <input
             aria-label="Deck name"
             value={deckName}
             maxLength={500}
             disabled={renameMutation.isPending}
-            onChange={(event) => setDeckNameDraft({ deckId, value: event.target.value })}
+            onChange={(event) => {
+              cancelRenameRef.current = false
+              setDeckNameDraft({ deckId, value: event.target.value })
+            }}
             onBlur={saveName}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur()
+              if (event.key === 'Enter') {
+                cancelRenameRef.current = false
+                event.currentTarget.blur()
+              }
               if (event.key === 'Escape') {
+                cancelRenameRef.current = true
                 setDeckNameDraft({ deckId, value: deckQuery.data.name })
                 setRenameError(null)
                 event.currentTarget.blur()
@@ -218,7 +322,7 @@ export function EditorPage() {
           {renameError && <span role="alert" className="truncate text-xs text-red-300">{renameError}</span>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button size="sm" variant="outline" className="border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700" onClick={() => setVersionsOpen(true)}>Versions</Button>
+          <Button size="sm" variant="outline" disabled={navigationBlocked} className="border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700" onClick={() => setVersionsOpen(true)}>Versions</Button>
           {navigationBlocked ? (
             <Button size="sm" disabled>Download</Button>
           ) : (
@@ -228,24 +332,62 @@ export function EditorPage() {
       </header>
 
       <main className="h-[calc(100vh-48px)]">
-        <OnlyOfficeEditor
-          key={`${currentStatus.current_version_id}:${editorAttempt}`}
-          documentServerUrl={configQuery.data.document_server_url}
-          config={configQuery.data.config}
-          onDirtyChange={handleDirtyChange}
-          onError={handleEditorError}
-        />
+        {isRestoring ? (
+          <div className="grid h-full place-items-center bg-slate-950 text-sm text-slate-300">Restoring version…</div>
+        ) : (
+          <OnlyOfficeEditor
+            key={`${currentStatus.current_version_id}:${editorAttempt}`}
+            documentServerUrl={configQuery.data.document_server_url}
+            config={configQuery.data.config}
+            onDirtyChange={handleDirtyChange}
+            onError={handleEditorError}
+          />
+        )}
       </main>
 
       <VersionHistoryDialog
         deckId={deckId}
         currentVersionId={currentStatus.current_version_id}
         open={versionsOpen}
+        interactionsDisabled={navigationBlocked}
         onClose={() => setVersionsOpen(false)}
+        onRestoringChange={setIsRestoring}
         onRestored={(status) => {
           setSaveState({ kind: 'confirmed', version: status.current_version_number })
         }}
+        onRestoreRefreshError={(message) => {
+          setEditorError(`Restored, but failed to refresh the editor: ${message}`)
+        }}
       />
+      {discardDialog}
+    </div>
+  )
+}
+
+function DiscardChangesDialog({
+  open,
+  onCancel,
+  onDiscard,
+}: {
+  open: boolean
+  onCancel: () => void
+  onDiscard: () => void
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (open) cancelRef.current?.focus()
+  }, [open])
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-4">
+      <section role="dialog" aria-modal="true" aria-labelledby="discard-title" className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl">
+        <h2 id="discard-title" className="text-lg font-semibold">Discard unsaved changes?</h2>
+        <p className="mt-2 text-sm text-slate-400">The latest edits have not been confirmed in storage.</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button ref={cancelRef} type="button" onClick={onCancel} className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-400/60">Keep editing</button>
+          <Button onClick={onDiscard}>Discard and leave</Button>
+        </div>
+      </section>
     </div>
   )
 }

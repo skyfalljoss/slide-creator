@@ -55,7 +55,7 @@ function renderEditor() {
   })
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/editor/deck-1']}>
+      <MemoryRouter initialEntries={['/my-decks', '/editor/deck-1']} initialIndex={1}>
         <Routes>
           <Route path="/editor/:deckId" element={<EditorPage />} />
           <Route path="/my-decks" element={<div>Deck library</div>} />
@@ -189,11 +189,102 @@ describe('EditorPage', () => {
     })
 
     expect(screen.getByText('Save confirmation timed out')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Versions' })).toBeDisabled()
+    const unsafeEvent = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(unsafeEvent)
+    expect(unsafeEvent.defaultPrevented).toBe(true)
     const callsAtTimeout = vi.mocked(getDeckStatus).mock.calls.length
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000)
     })
     expect(getDeckStatus).toHaveBeenCalledTimes(callsAtTimeout)
+  })
+
+  it('keeps a failed save unsafe and guards navigation', async () => {
+    vi.mocked(getDeckStatus)
+      .mockResolvedValueOnce(versionOne)
+      .mockRejectedValueOnce(new Error('Persistence confirmation failed'))
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+    vi.useFakeTimers()
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+    act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+
+    expect(screen.getByText('Persistence confirmation failed')).toBeInTheDocument()
+    const unsafeEvent = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(unsafeEvent)
+    expect(unsafeEvent.defaultPrevented).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeInTheDocument()
+  })
+
+  it('captures the dirty baseline before status advances and confirms immediately on clean', async () => {
+    const { queryClient } = renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+    act(() => {
+      queryClient.setQueryData(['deck-status', 'deck-1'], {
+        current_version_id: 'version-2',
+        current_version_number: 2,
+        updated_at: '2026-06-26T00:01:00Z',
+      })
+    })
+    act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+
+    expect(screen.getByText('Saved as version 2')).toBeInTheDocument()
+    expect(getDeckStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('tracks repeated dirty and clean save cycles', async () => {
+    vi.mocked(getDeckStatus)
+      .mockResolvedValueOnce(versionOne)
+      .mockResolvedValueOnce({ ...versionOne, current_version_id: 'version-2', current_version_number: 2 })
+      .mockResolvedValue({ ...versionOne, current_version_id: 'version-3', current_version_number: 3 })
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+    act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    expect(await screen.findByText('Saved as version 2', {}, { timeout: 2_000 })).toBeInTheDocument()
+
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+    act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    expect(await screen.findByText('Saved as version 3', {}, { timeout: 2_000 })).toBeInTheDocument()
+  })
+
+  it('requires deliberate discard before Back navigation while unsafe', async () => {
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Discard unsaved changes?' })
+    expect(screen.queryByText('Deck library')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' }))
+    expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Discard and leave' }))
+    expect(await screen.findByText('Deck library')).toBeInTheDocument()
+  })
+
+  it('intercepts browser history navigation while unsafe', async () => {
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')))
+    const dialog = screen.getByRole('dialog', { name: 'Discard unsaved changes?' })
+    expect(screen.queryByText('Deck library')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Discard and leave' }))
+
+    expect(await screen.findByText('Deck library')).toBeInTheDocument()
   })
 
   it('shows retry and back actions when editor configuration fails', async () => {
@@ -243,6 +334,30 @@ describe('EditorPage', () => {
     await waitFor(() => expect(screen.queryByText('Name rejected')).not.toBeInTheDocument())
   })
 
+  it('cancels rename on Escape without sending a PATCH', async () => {
+    renderEditor()
+    const nameInput = await screen.findByRole('textbox', { name: 'Deck name' })
+
+    nameInput.focus()
+    fireEvent.change(nameInput, { target: { value: 'Do not save this' } })
+    fireEvent.keyDown(nameInput, { key: 'Escape' })
+
+    expect(nameInput).toHaveValue('Quarterly Review')
+    expect(renameDeck).not.toHaveBeenCalled()
+  })
+
+  it('commits rename once when Enter causes blur', async () => {
+    renderEditor()
+    const nameInput = await screen.findByRole('textbox', { name: 'Deck name' })
+    nameInput.focus()
+    fireEvent.change(nameInput, { target: { value: 'One rename' } })
+    fireEvent.keyDown(nameInput, { key: 'Enter' })
+    fireEvent.blur(nameInput)
+
+    await waitFor(() => expect(renameDeck).toHaveBeenCalledWith('deck-1', 'One rename'))
+    expect(renameDeck).toHaveBeenCalledTimes(1)
+  })
+
   it('lists versions newest first and requires confirmation before restore', async () => {
     vi.mocked(listDeckVersions).mockResolvedValue({
       versions: [
@@ -282,6 +397,93 @@ describe('EditorPage', () => {
     await waitFor(() => expect(restoreDeckVersion).toHaveBeenCalledWith('deck-1', 'version-1'))
     await waitFor(() => expect(editorConfigs).toHaveLength(2))
     expect(destroyEditor).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not mount a restored editor until fresh status and config both arrive', async () => {
+    let resolveConfig!: (value: { document_server_url: string; config: Record<string, unknown> }) => void
+    const delayedConfig = new Promise<{ document_server_url: string; config: Record<string, unknown> }>((resolve) => {
+      resolveConfig = resolve
+    })
+    vi.mocked(getEditorConfig)
+      .mockResolvedValueOnce({ document_server_url: 'http://onlyoffice.test', config: { marker: 'old' } })
+      .mockReturnValueOnce(delayedConfig)
+    vi.mocked(listDeckVersions).mockResolvedValue({
+      versions: [
+        { id: 'version-1', version_number: 1, source: 'generated', created_by: 'user', created_at: '2026-06-26T00:00:00Z', size_bytes: 10, sha256: 'one' },
+      ],
+    })
+    vi.mocked(getDeckStatus)
+      .mockResolvedValueOnce({ ...versionOne, current_version_id: 'version-2', current_version_number: 2 })
+      .mockResolvedValue({ ...versionOne, current_version_id: 'version-3', current_version_number: 3 })
+    vi.mocked(restoreDeckVersion).mockResolvedValue({
+      current_version_id: 'version-3',
+      current_version_number: 3,
+      updated_at: '2026-06-26T00:02:00Z',
+    })
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Versions' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Version history' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Restore version 1' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm restore version 1' }))
+
+    expect(await screen.findByText('Restoring version…')).toBeInTheDocument()
+    expect(destroyEditor).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(getEditorConfig).toHaveBeenCalledTimes(2))
+    expect(editorConfigs).toHaveLength(1)
+
+    await act(async () => {
+      resolveConfig({ document_server_url: 'http://onlyoffice.test', config: { marker: 'fresh' } })
+    })
+    await waitFor(() => expect(editorConfigs).toHaveLength(2))
+    expect(editorConfigs[1]).toMatchObject({ marker: 'fresh' })
+  })
+
+  it('traps focus in version history and restores it to the opener', async () => {
+    vi.mocked(getDeckStatus).mockResolvedValue({ ...versionOne, current_version_id: 'version-2', current_version_number: 2 })
+    vi.mocked(listDeckVersions).mockResolvedValue({
+      versions: [
+        { id: 'version-1', version_number: 1, source: 'generated', created_by: 'user', created_at: '2026-06-26T00:00:00Z', size_bytes: 10, sha256: 'one' },
+      ],
+    })
+    renderEditor()
+    const opener = await screen.findByRole('button', { name: 'Versions' })
+    opener.focus()
+    fireEvent.click(opener)
+    const dialog = await screen.findByRole('dialog', { name: 'Version history' })
+    const close = within(dialog).getByRole('button', { name: 'Close version history' })
+    await waitFor(() => expect(close).toHaveFocus())
+    expect(screen.getByRole('main', { hidden: true })).toHaveAttribute('aria-hidden', 'true')
+
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })
+    const restore = await within(dialog).findByRole('button', { name: 'Restore version 1' })
+    expect(restore).toHaveFocus()
+    fireEvent.keyDown(restore, { key: 'Tab' })
+    expect(close).toHaveFocus()
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Version history' })).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
+  it('disables restore actions if the document becomes unsafe while history is open', async () => {
+    vi.mocked(getDeckStatus).mockResolvedValue({ ...versionOne, current_version_id: 'version-2', current_version_number: 2 })
+    vi.mocked(listDeckVersions).mockResolvedValue({
+      versions: [
+        { id: 'version-1', version_number: 1, source: 'generated', created_by: 'user', created_at: '2026-06-26T00:00:00Z', size_bytes: 10, sha256: 'one' },
+      ],
+    })
+    renderEditor()
+    await waitFor(() => expect(editorConfigs).toHaveLength(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Versions' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Version history' })
+    const restore = await within(dialog).findByRole('button', { name: 'Restore version 1' })
+    expect(restore).toBeEnabled()
+
+    act(() => documentStateHandler().onDocumentStateChange({ data: true }))
+
+    expect(restore).toBeDisabled()
   })
 
   it('keeps the version dialog open and reports restore failures', async () => {
