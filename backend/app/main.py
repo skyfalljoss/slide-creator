@@ -51,14 +51,12 @@ async def lifespan(app: FastAPI):
         get_deck_repository,
         get_deck_version_service,
         get_onlyoffice_service,
-        get_deck_store,
         get_http_client,
     )
 
     database = get_database()
     http_client = get_http_client()
     try:
-        await get_deck_store().initialize()
         if settings.database_url.startswith("sqlite"):
             await database.create_schema()
         purge_local_temp_files()

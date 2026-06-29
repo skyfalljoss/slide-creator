@@ -2,16 +2,22 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import settings
-from app.dependencies import get_audit_service, get_session_store, get_storage_service
+from app.dependencies import (
+    get_audit_service,
+    get_deck_repository,
+    get_session_store,
+    get_storage_service,
+)
 from app.errors import GenerationError, SessionNotFoundError
 from app.middleware.rate_limit import limiter
-from app.models.schemas import ExportRequest, ExportResponse
+from app.models.schemas import ExportRequest, ExportResponse, SlideData
 from app.services.platform.auth import get_user_id
 from app.services.generation.deck_normalizer import normalize_deck
 from app.services.generation.gemini_api import SLIDE_COUNTS, SLIDE_COUNT_TOLERANCE
 from app.services.presentation.pptx_engine import PptxEngine
 from app.services.presentation.pptx_validation import InvalidPptxError, validate_pptx
 from app.services.platform.session import SessionStore
+from app.services.platform.deck_repository import DeckRepository
 from app.services.platform.storage import StorageService
 
 router = APIRouter()
@@ -24,6 +30,7 @@ async def export_deck(
     request: Request,
     session_store: SessionStore = Depends(get_session_store),
     storage: StorageService = Depends(get_storage_service),
+    repository: DeckRepository = Depends(get_deck_repository),
 ) -> ExportResponse:
     slides: list
     deck_type = "unknown"
@@ -32,15 +39,17 @@ async def export_deck(
     export_session_id = ""
 
     if req.deck_id:
-        from app.dependencies import get_deck_store
-        deck_store = get_deck_store()
-        deck = await deck_store.get(req.deck_id)
+        deck = await repository.get(req.deck_id, get_user_id(request))
         if deck is None:
             raise HTTPException(status_code=404, detail="Deck not found")
-        slides = deck["slides"]
-        deck_type = deck["deck_type"]
-        theme = deck["theme"]
-        aspect_ratio = deck["aspect_ratio"]
+        payload = deck.generation_payload
+        saved_slides = payload.get("slides") if isinstance(payload, dict) else None
+        if not isinstance(saved_slides, list):
+            raise HTTPException(status_code=404, detail="Deck slides not found")
+        slides = [SlideData.model_validate(slide) for slide in saved_slides]
+        deck_type = deck.deck_type
+        theme = deck.theme
+        aspect_ratio = deck.aspect_ratio
         export_session_id = req.deck_id
     elif req.session_id:
         session = session_store.get(req.session_id)

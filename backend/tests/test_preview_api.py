@@ -1,16 +1,13 @@
 import base64
-import os
-import tempfile
-from pathlib import Path
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
-from app.dependencies import get_deck_store, get_preview_service
+from app.dependencies import get_preview_service
 from app.main import app
 from app.models.schemas import SlidePreviewResponse
-from app.services.platform.deck_store import DeckStore
 from app.services.presentation.pptx_preview import PreviewRendererUnavailable
+from tests.test_decks_api import deck_api as deck_api
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\napi-preview"
@@ -38,24 +35,11 @@ class FakePreviewService:
 
 
 @pytest.fixture
-def tmp_db_path():
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    yield path
-    Path(path).unlink(missing_ok=True)
-
-
-@pytest.fixture
-async def preview_client(tmp_db_path: str):
-    store = DeckStore(tmp_db_path)
-    await store.initialize()
+async def preview_client(deck_api):
+    client, _repository, _storage = deck_api
     service = FakePreviewService()
-    app.dependency_overrides[get_deck_store] = lambda: store
     app.dependency_overrides[get_preview_service] = lambda: service
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac, service
-    app.dependency_overrides.clear()
+    yield client, service
 
 
 async def _create_deck(client: AsyncClient) -> str:
@@ -115,17 +99,12 @@ async def test_get_deck_slide_preview_invalid_slide_returns_422(preview_client):
 
 
 @pytest.mark.asyncio
-async def test_get_deck_slide_preview_unavailable_returns_503(tmp_db_path: str):
-    store = DeckStore(tmp_db_path)
-    await store.initialize()
+async def test_get_deck_slide_preview_unavailable_returns_503(deck_api):
+    client, _repository, _storage = deck_api
     service = FakePreviewService(unavailable=True)
-    app.dependency_overrides[get_deck_store] = lambda: store
     app.dependency_overrides[get_preview_service] = lambda: service
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        deck_id = await _create_deck(client)
-        resp = await client.get(f"/api/v1/decks/{deck_id}/preview?slide_index=1")
+    deck_id = await _create_deck(client)
+    resp = await client.get(f"/api/v1/decks/{deck_id}/preview?slide_index=1")
 
-    app.dependency_overrides.clear()
     assert resp.status_code == 503
     assert "LibreOffice/soffice not found" in resp.json()["detail"]

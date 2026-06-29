@@ -248,6 +248,10 @@ class UpdateDeckRequest(BaseModel):
     slides: list[SlideData] | None = None
 
 
+class RenameDeckRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=500)
+
+
 class SaveDeckResponse(BaseModel):
     id: str
     name: str
@@ -264,3 +268,27 @@ class DeleteDeckResponse(BaseModel):
 
 class ListDecksResponse(BaseModel):
     decks: list[DeckSummary]
+
+
+class DeckVersionResponse(BaseModel):
+    id: str
+    version_number: int
+    source: Literal["generated", "onlyoffice_save", "restore"]
+    created_by: str
+    size_bytes: int
+    sha256: str
+    created_at: datetime
+
+
+class ListDeckVersionsResponse(BaseModel):
+    versions: list[DeckVersionResponse]
+
+
+class DeckStatusResponse(BaseModel):
+    current_version_id: str
+    current_version_number: int
+    updated_at: datetime
+
+
+class RestoreVersionResponse(DeckStatusResponse):
+    pass

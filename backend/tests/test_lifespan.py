@@ -15,17 +15,17 @@ from app.main import app, lifespan
         ("postgresql+asyncpg://localhost/slideforge", 0),
     ],
 )
-async def test_lifespan_initializes_legacy_and_manages_new_resources(
+async def test_lifespan_skips_legacy_store_and_manages_new_resources(
     monkeypatch,
     database_url,
     expected_schema_calls,
 ):
     database = Mock(create_schema=AsyncMock(), dispose=AsyncMock())
-    legacy_store = Mock(initialize=AsyncMock())
+    legacy_provider = Mock()
     http_client = Mock(aclose=AsyncMock(), is_closed=False)
     monkeypatch.setattr(settings, "database_url", database_url)
     monkeypatch.setattr(dependencies, "get_database", lambda: database)
-    monkeypatch.setattr(dependencies, "get_deck_store", lambda: legacy_store)
+    monkeypatch.setattr(dependencies, "get_deck_store", legacy_provider)
     monkeypatch.setattr(dependencies, "get_http_client", lambda: http_client)
     monkeypatch.setattr(dependencies.get_deck_repository, "cache_clear", Mock())
     monkeypatch.setattr(dependencies.get_deck_file_storage, "cache_clear", Mock())
@@ -37,7 +37,7 @@ async def test_lifespan_initializes_legacy_and_manages_new_resources(
     monkeypatch.setattr("app.main.purge_local_temp_files", Mock())
 
     async with lifespan(app):
-        legacy_store.initialize.assert_awaited_once()
+        legacy_provider.assert_not_called()
         assert database.create_schema.await_count == expected_schema_calls
 
     database.dispose.assert_awaited_once()

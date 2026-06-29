@@ -124,6 +124,7 @@ _deck_store: DeckStore | None = None
 
 
 def get_deck_store() -> DeckStore:
+    """Return the legacy store for migration tooling, not active API routes."""
     global _deck_store
     if _deck_store is None:
         _deck_store = DeckStore(settings.deck_db_path)

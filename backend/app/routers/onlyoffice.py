@@ -1,8 +1,10 @@
 import asyncio
+import re
+import unicodedata
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.dependencies import (
     get_deck_file_storage,
@@ -10,7 +12,14 @@ from app.dependencies import (
     get_deck_version_service,
     get_onlyoffice_service,
 )
-from app.models.schemas import OnlyOfficeCallback, OnlyOfficeEditorConfig
+from app.models.schemas import (
+    DeckStatusResponse,
+    DeckVersionResponse,
+    ListDeckVersionsResponse,
+    OnlyOfficeCallback,
+    OnlyOfficeEditorConfig,
+    RestoreVersionResponse,
+)
 from app.services.platform.auth import get_user_id
 from app.services.platform.deck_files import (
     DECK_STREAM_CHUNK_SIZE,
@@ -18,8 +27,11 @@ from app.services.platform.deck_files import (
     DeckFileStorage,
     PPTX_CONTENT_TYPE,
 )
-from app.services.platform.deck_repository import DeckRepository
-from app.services.platform.deck_versions import DeckVersionService
+from app.services.platform.deck_repository import DeckRecord, DeckRepository
+from app.services.platform.deck_versions import (
+    DeckNotFoundError,
+    DeckVersionService,
+)
 from app.services.platform.onlyoffice import (
     OnlyOfficeAuthorizationError,
     OnlyOfficeService,
@@ -30,6 +42,123 @@ from app.services.platform.onlyoffice import (
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
+
+
+def _status(deck: DeckRecord) -> DeckStatusResponse:
+    if deck.current_version is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    return DeckStatusResponse(
+        current_version_id=deck.current_version.id,
+        current_version_number=deck.current_version.version_number,
+        updated_at=deck.updated_at,
+    )
+
+
+def _attachment_filename(name: str) -> str:
+    normalized = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    if normalized.lower().endswith(".pptx"):
+        normalized = normalized[:-5]
+    normalized = re.sub(r"[^A-Za-z0-9 _.-]+", "_", normalized)
+    normalized = normalized.replace("..", "_").strip(" .")
+    normalized = re.sub(r"\s+", " ", normalized)[:180].rstrip(" .")
+    return f"{normalized or 'deck'}.pptx"
+
+
+@router.get("/decks/{deck_id}/status", response_model=DeckStatusResponse)
+async def get_deck_status(
+    deck_id: str,
+    request: Request,
+    repository: DeckRepository = Depends(get_deck_repository),
+) -> DeckStatusResponse:
+    deck = await repository.get(deck_id, get_user_id(request))
+    if deck is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    return _status(deck)
+
+
+@router.get(
+    "/decks/{deck_id}/versions",
+    response_model=ListDeckVersionsResponse,
+)
+async def list_deck_versions(
+    deck_id: str,
+    request: Request,
+    repository: DeckRepository = Depends(get_deck_repository),
+) -> ListDeckVersionsResponse:
+    owner_id = get_user_id(request)
+    if await repository.get(deck_id, owner_id) is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    versions = await repository.list_versions(deck_id, owner_id)
+    return ListDeckVersionsResponse(
+        versions=[
+            DeckVersionResponse(
+                id=version.id,
+                version_number=version.version_number,
+                source=version.source,
+                created_by=version.created_by,
+                size_bytes=version.size_bytes,
+                sha256=version.sha256,
+                created_at=version.created_at,
+            )
+            for version in versions
+        ]
+    )
+
+
+@router.post(
+    "/decks/{deck_id}/versions/{version_id}/restore",
+    response_model=RestoreVersionResponse,
+)
+async def restore_deck_version(
+    deck_id: str,
+    version_id: str,
+    request: Request,
+    repository: DeckRepository = Depends(get_deck_repository),
+    versions: DeckVersionService = Depends(get_deck_version_service),
+) -> RestoreVersionResponse:
+    owner_id = get_user_id(request)
+    try:
+        restored = await versions.restore_version(
+            deck_id=deck_id,
+            version_id=version_id,
+            owner_id=owner_id,
+            created_by=owner_id,
+        )
+    except DeckNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Deck not found") from exc
+    deck = await repository.get(deck_id, owner_id)
+    if deck is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    return RestoreVersionResponse(
+        current_version_id=restored.id,
+        current_version_number=restored.version_number,
+        updated_at=deck.updated_at,
+    )
+
+
+@router.get("/decks/{deck_id}/download")
+async def download_deck(
+    deck_id: str,
+    request: Request,
+    repository: DeckRepository = Depends(get_deck_repository),
+    storage: DeckFileStorage = Depends(get_deck_file_storage),
+) -> Response:
+    deck = await repository.get(deck_id, get_user_id(request))
+    if deck is None or deck.current_version is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    try:
+        content = await storage.read(deck.current_version.storage_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Deck content not found") from exc
+    filename = _attachment_filename(deck.name)
+    return Response(
+        content=content,
+        media_type=PPTX_CONTENT_TYPE,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 def _require_onlyoffice(onlyoffice: OnlyOfficeService) -> None:

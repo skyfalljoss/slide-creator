@@ -1,18 +1,16 @@
 from io import BytesIO
 
-from httpx import AsyncClient, ASGITransport
+from httpx import AsyncClient
 from pptx import Presentation
 import pytest
 
-from app.main import app
+from tests.test_decks_api import deck_api as deck_api
 
 
 @pytest.fixture
-async def client():
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-        app.dependency_overrides.clear()
+async def client(deck_api):
+    api_client, _repository, _storage = deck_api
+    yield api_client
 
 
 @pytest.mark.asyncio
