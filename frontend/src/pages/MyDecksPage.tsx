@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
-import { listDecks, deleteDeck, exportDeckById } from '@/lib/api'
+import { deckDownloadUrl, deleteDeck, listDecks } from '@/lib/api'
 import type { DeckSummary } from '@/types'
 
 const DECK_TYPE_LABELS: Record<string, string> = {
@@ -43,14 +43,6 @@ export function MyDecksPage() {
       setDeleteConfirm(null)
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to delete'),
-  })
-
-  const exportMutation = useMutation({
-    mutationFn: exportDeckById,
-    onSuccess: (data) => {
-      window.open(data.download_url, '_blank')
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to export'),
   })
 
   const decks = data?.decks ?? []
@@ -136,10 +128,9 @@ export function MyDecksPage() {
                     size="sm"
                     variant="outline"
                     className="border-white/15 bg-white/5 text-slate-200 hover:border-indigo-400/50 hover:bg-white/10"
-                    onClick={() => exportMutation.mutate(deck.id)}
-                    disabled={exportMutation.isPending}
+                    onClick={() => window.open(deckDownloadUrl(deck.id), '_self')}
                   >
-                    Export
+                    Download
                   </Button>
                   <Button
                     size="sm"

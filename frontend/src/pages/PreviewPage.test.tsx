@@ -134,15 +134,25 @@ describe('PreviewPage', () => {
     await waitFor(() => expect(screen.getAllByText(/Refined Summary/i).length).toBeGreaterThan(0))
   })
 
-  it('invalidates deck listings before navigating to my decks after save', async () => {
+  it('updates only legacy metadata without replacing the authoritative PPTX', async () => {
     sessionStorage.setItem('slideforge.deck', JSON.stringify(storedDeck))
     vi.mocked(updateDeck).mockResolvedValue({ updated_at: '2026-06-26T00:00:00Z' })
 
     const { invalidateSpy } = renderPreviewWithDeckRoute()
     fireEvent.click(screen.getByRole('button', { name: /update in my decks/i }))
 
-    await waitFor(() => expect(updateDeck).toHaveBeenCalledWith('deck-1', { name: 'Executive Summary', slides: storedDeck.slides }))
+    await waitFor(() => expect(updateDeck).toHaveBeenCalledWith('deck-1', { name: 'Executive Summary' }))
+    expect(saveDeck).not.toHaveBeenCalled()
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['decks'] }))
     await waitFor(() => expect(screen.getByText('My Decks route')).toBeInTheDocument())
+  })
+
+  it('does not offer first persistence for a legacy preview without a saved deck', () => {
+    sessionStorage.setItem('slideforge.deck', JSON.stringify({ ...storedDeck, savedDeckId: null }))
+
+    renderPreview()
+
+    expect(screen.queryByRole('button', { name: /save to my decks/i })).not.toBeInTheDocument()
+    expect(saveDeck).not.toHaveBeenCalled()
   })
 })

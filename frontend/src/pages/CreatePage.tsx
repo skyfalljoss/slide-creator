@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { GenerationOverlay } from '@/components/create/GenerationOverlay'
 import { cn } from '@/lib/utils'
 import type { DeckType } from '@/types'
-import { generate, saveDeck, uploadFile } from '@/lib/api'
+import { generate, uploadFile } from '@/lib/api'
 import { useDeck } from '@/state/deck'
 
 type SourceType = 'brief' | 'script'
@@ -112,21 +112,14 @@ export function CreatePage() {
         aspect_ratio: aspectRatio,
         file_id: uploadedFile?.file_id ?? null,
       })
-      const savedDeck = await saveDeck({
-        name: result.slides[0]?.title || 'Untitled Deck',
-        deck_type: deckType,
-        theme,
-        aspect_ratio: aspectRatio,
-        slides: result.slides,
-      })
       deck.setGeneratedDeck({
         sessionId: result.session_id,
-        savedDeckId: savedDeck.id,
+        savedDeckId: result.deck_id,
         deckType,
         slides: result.slides,
         uploadedFile,
       })
-      navigate('/preview')
+      navigate(result.editor_path)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate deck')
     }
