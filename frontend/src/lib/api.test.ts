@@ -115,4 +115,32 @@ describe('api client', () => {
     })
     expect(deckDownloadUrl('deck-1')).toBe('http://localhost:8000/api/v1/decks/deck-1/download')
   })
+
+  it('encodes deck and version IDs as individual URL path segments', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) })
+    const deckId = 'deck/with space?'
+    const versionId = 'version/#2'
+
+    await getEditorConfig(deckId)
+    await getDeckStatus(deckId)
+    await listDeckVersions(deckId)
+    await restoreDeckVersion(deckId, versionId)
+    await renameDeck(deckId, 'Renamed')
+
+    const encodedDeckId = 'deck%2Fwith%20space%3F'
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `http://localhost:8000/api/v1/decks/${encodedDeckId}/editor-config`)
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `http://localhost:8000/api/v1/decks/${encodedDeckId}/status`)
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `http://localhost:8000/api/v1/decks/${encodedDeckId}/versions`)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      `http://localhost:8000/api/v1/decks/${encodedDeckId}/versions/version%2F%232/restore`,
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      `http://localhost:8000/api/v1/decks/${encodedDeckId}`,
+      expect.objectContaining({ method: 'PATCH' }),
+    )
+    expect(deckDownloadUrl(deckId)).toBe(`http://localhost:8000/api/v1/decks/${encodedDeckId}/download`)
+  })
 })
