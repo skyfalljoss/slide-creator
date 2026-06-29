@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
+import { AccessibleModal } from './AccessibleModal'
+import { restoredSnapshotError } from './restoreSync'
 import { listDeckVersions, restoreDeckVersion } from '@/lib/api'
-import type { DeckStatus, DeckVersion } from '@/types'
+import type { DeckStatus, DeckVersion, OnlyOfficeEditorConfig } from '@/types'
 
 interface VersionHistoryDialogProps {
   deckId: string
@@ -12,7 +14,7 @@ interface VersionHistoryDialogProps {
   onClose: () => void
   onRestoringChange: (restoring: boolean) => void
   onRestored: (status: DeckStatus) => void
-  onRestoreRefreshError: (message: string) => void
+  onRestoreSyncError: (message: string, expected: DeckStatus) => void
 }
 
 function versionLabel(version: DeckVersion): string {
@@ -29,10 +31,9 @@ export function VersionHistoryDialog({
   onClose,
   onRestoringChange,
   onRestored,
-  onRestoreRefreshError,
+  onRestoreSyncError,
 }: VersionHistoryDialogProps) {
   const queryClient = useQueryClient()
-  const overlayRef = useRef<HTMLDivElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const [confirmation, setConfirmation] = useState<DeckVersion | null>(null)
   const [restoreError, setRestoreError] = useState<string | null>(null)
@@ -53,11 +54,16 @@ export function VersionHistoryDialog({
           queryClient.refetchQueries({ queryKey: ['deck-versions', deckId], exact: true }, { throwOnError: true }),
         ])
       } catch (error) {
-        throw new RestoreRefreshError(
+        throw new RestoreSyncError(
           error instanceof Error ? error.message : 'Failed to refresh the restored deck',
+          status,
         )
       }
-      return queryClient.getQueryData<DeckStatus>(['deck-status', deckId]) ?? status
+      const freshStatus = queryClient.getQueryData<DeckStatus>(['deck-status', deckId])
+      const freshConfig = queryClient.getQueryData<OnlyOfficeEditorConfig>(['editor-config', deckId])
+      const error = restoredSnapshotError(deckId, status, freshStatus, freshConfig)
+      if (error) throw new RestoreSyncError(error, status)
+      return freshStatus ?? status
     },
     onMutate: () => {
       setRestoreError(null)
@@ -72,8 +78,8 @@ export function VersionHistoryDialog({
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : 'Failed to restore version'
-      if (error instanceof RestoreRefreshError) {
-        onRestoreRefreshError(message)
+      if (error instanceof RestoreSyncError) {
+        onRestoreSyncError(message, error.expected)
       } else {
         onRestoringChange(false)
       }
@@ -81,73 +87,11 @@ export function VersionHistoryDialog({
     },
   })
 
-  useEffect(() => {
-    if (!open) return
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const overlay = overlayRef.current
-    const parent = overlay?.parentElement
-    const backgroundElements = parent
-      ? Array.from(parent.children).filter((element): element is HTMLElement => (
-          element instanceof HTMLElement && element !== overlay
-        ))
-      : []
-    const originalState = backgroundElements.map((element) => ({
-      element,
-      ariaHidden: element.getAttribute('aria-hidden'),
-      inert: element.hasAttribute('inert'),
-    }))
-    for (const element of backgroundElements) {
-      element.setAttribute('aria-hidden', 'true')
-      element.setAttribute('inert', '')
-    }
-    closeButtonRef.current?.focus()
-
-    return () => {
-      for (const { element, ariaHidden, inert } of originalState) {
-        if (ariaHidden === null) element.removeAttribute('aria-hidden')
-        else element.setAttribute('aria-hidden', ariaHidden)
-        if (!inert) element.removeAttribute('inert')
-      }
-      opener?.focus()
-    }
-  }, [open])
-
   const close = useCallback(() => {
     setConfirmation(null)
     setRestoreError(null)
     onClose()
   }, [onClose])
-
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !restoreMutation.isPending) {
-        event.preventDefault()
-        close()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const focusable = overlayRef.current?.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), a[href], input:not(:disabled), [tabindex]:not([tabindex="-1"])',
-      )
-      const elements = focusable ? Array.from(focusable) : []
-      if (elements.length === 0) {
-        event.preventDefault()
-        return
-      }
-      const first = elements[0]
-      const last = elements[elements.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [close, open, restoreMutation.isPending])
 
   if (!open) return null
 
@@ -158,15 +102,8 @@ export function VersionHistoryDialog({
     : versionsQuery.error ? 'Failed to load version history' : null
 
   return (
-    <div ref={overlayRef} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && !restoreMutation.isPending) close()
-    }}>
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="version-history-title"
-        className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl"
-      >
+    <AccessibleModal open={open} labelledBy="version-history-title" initialFocusRef={closeButtonRef} onRequestClose={close} canClose={!restoreMutation.isPending}>
+      <div className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl">
         <div className="flex items-center justify-between">
           <h2 id="version-history-title" className="text-lg font-semibold">Version history</h2>
           <button ref={closeButtonRef} type="button" onClick={close} disabled={restoreMutation.isPending} aria-label="Close version history" className="rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white">×</button>
@@ -227,9 +164,16 @@ export function VersionHistoryDialog({
           </div>
         )}
         {restoreError && <p role="alert" className="mt-3 text-sm text-red-300">{restoreError}</p>}
-      </section>
-    </div>
+      </div>
+    </AccessibleModal>
   )
 }
 
-class RestoreRefreshError extends Error {}
+class RestoreSyncError extends Error {
+  readonly expected: DeckStatus
+
+  constructor(message: string, expected: DeckStatus) {
+    super(message)
+    this.expected = expected
+  }
+}

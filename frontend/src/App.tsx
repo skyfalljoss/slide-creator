@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Layout } from '@/components/layout/Layout'
 import { LoginPage } from '@/pages/LoginPage'
@@ -12,22 +13,25 @@ import { DeckProvider } from '@/state/DeckContext'
 const queryClient = new QueryClient()
 
 export default function App() {
+  const [router] = useState(() => createBrowserRouter([
+    { path: '/login', element: <LoginPage /> },
+    { path: '/editor/:deckId', element: <EditorPage /> },
+    {
+      element: <Layout />,
+      children: [
+        { path: '/create', element: <CreatePage /> },
+        { path: '/preview', element: <PreviewPage /> },
+        { path: '/export', element: <ExportPage /> },
+        { path: '/my-decks', element: <MyDecksPage /> },
+      ],
+    },
+    { path: '*', element: <Navigate to="/create" replace /> },
+  ]))
+  useEffect(() => () => router.dispose(), [router])
   return (
     <QueryClientProvider client={queryClient}>
       <DeckProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/editor/:deckId" element={<EditorPage />} />
-            <Route element={<Layout />}>
-              <Route path="/create" element={<CreatePage />} />
-              <Route path="/preview" element={<PreviewPage />} />
-              <Route path="/export" element={<ExportPage />} />
-              <Route path="/my-decks" element={<MyDecksPage />} />
-            </Route>
-            <Route path="*" element={<Navigate to="/create" replace />} />
-          </Routes>
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </DeckProvider>
     </QueryClientProvider>
   )

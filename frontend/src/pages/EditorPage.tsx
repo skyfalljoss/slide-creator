@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useBlocker, useNavigate, useParams } from 'react-router-dom'
+import { AccessibleModal } from '@/components/editor/AccessibleModal'
 import { OnlyOfficeEditor } from '@/components/editor/OnlyOfficeEditor'
+import { restoredSnapshotError } from '@/components/editor/restoreSync'
 import { VersionHistoryDialog } from '@/components/editor/VersionHistoryDialog'
 import { Button } from '@/components/ui/Button'
 import {
@@ -11,6 +13,7 @@ import {
   getEditorConfig,
   renameDeck,
 } from '@/lib/api'
+import type { DeckStatus, OnlyOfficeEditorConfig } from '@/types'
 
 type SaveState =
   | { kind: 'clean' }
@@ -36,10 +39,10 @@ export function EditorPage() {
   const [editorAttempt, setEditorAttempt] = useState(0)
   const [versionsOpen, setVersionsOpen] = useState(false)
   const [isRestoring, setIsRestoring] = useState(false)
-  const [discardTarget, setDiscardTarget] = useState<'back' | 'history' | null>(null)
+  const [restoreSyncError, setRestoreSyncError] = useState<{ expected: DeckStatus; message: string } | null>(null)
+  const [isSyncRetrying, setIsSyncRetrying] = useState(false)
   const cancelRenameRef = useRef(false)
   const renameSubmissionRef = useRef<string | null>(null)
-  const historyGuardRef = useRef(false)
 
   const deckQuery = useQuery({
     queryKey: ['deck', deckId],
@@ -107,28 +110,7 @@ export function EditorPage() {
     window.addEventListener('beforeunload', warnBeforeUnload)
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
   }, [navigationBlocked])
-
-  useEffect(() => {
-    if (!navigationBlocked || !deckId) return
-    const guardState = { ...window.history.state, slideForgeEditorGuard: deckId }
-    if (!historyGuardRef.current) {
-      window.history.pushState(guardState, '', window.location.href)
-      historyGuardRef.current = true
-    }
-    const onPopState = () => {
-      window.history.pushState(guardState, '', window.location.href)
-      historyGuardRef.current = true
-      setDiscardTarget('history')
-    }
-    window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
-  }, [deckId, navigationBlocked])
-
-  useEffect(() => {
-    if (navigationBlocked || !historyGuardRef.current) return
-    historyGuardRef.current = false
-    if (window.history.state?.slideForgeEditorGuard) window.history.back()
-  }, [navigationBlocked])
+  const blocker = useBlocker(navigationBlocked)
 
   const renameMutation = useMutation({
     mutationFn: (name: string) => renameDeck(deckId!, name),
@@ -196,38 +178,47 @@ export function EditorPage() {
   }, [])
 
   const requestBack = () => {
-    if (navigationBlocked) {
-      setDiscardTarget('back')
-    } else {
-      navigate('/my-decks')
-    }
+    navigate('/my-decks')
   }
 
-  const retryAfterRestore = () => {
-    if (!deckId) return
+  const retryRestoreSynchronization = () => {
+    if (!deckId || !restoreSyncError) return
+    const expected = restoreSyncError.expected
+    setIsSyncRetrying(true)
     void Promise.all([
       queryClient.refetchQueries({ queryKey: ['deck', deckId], exact: true, type: 'all' }, { throwOnError: true }),
       queryClient.refetchQueries({ queryKey: ['editor-config', deckId], exact: true, type: 'all' }, { throwOnError: true }),
       queryClient.refetchQueries({ queryKey: ['deck-status', deckId], exact: true, type: 'all' }, { throwOnError: true }),
       queryClient.refetchQueries({ queryKey: ['deck-versions', deckId], exact: true, type: 'all' }, { throwOnError: true }),
     ]).then(() => {
-      setEditorError(null)
+      const freshStatus = queryClient.getQueryData<DeckStatus>(['deck-status', deckId])
+      const freshConfig = queryClient.getQueryData<OnlyOfficeEditorConfig>(['editor-config', deckId])
+      const error = restoredSnapshotError(deckId, expected, freshStatus, freshConfig)
+      if (error) {
+        setRestoreSyncError({ expected, message: error })
+        return
+      }
+      setRestoreSyncError(null)
+      setSaveState({ kind: 'confirmed', version: freshStatus!.current_version_number })
       setIsRestoring(false)
     }).catch((error: unknown) => {
-      setEditorError(`Restored, but failed to refresh the editor: ${error instanceof Error ? error.message : 'Refresh failed'}`)
+      setRestoreSyncError({
+        expected,
+        message: error instanceof Error ? error.message : 'Failed to synchronize the restored editor',
+      })
+    }).finally(() => {
+      setIsSyncRetrying(false)
     })
   }
 
   const discardDialog = (
     <DiscardChangesDialog
-      open={discardTarget !== null}
-      onCancel={() => setDiscardTarget(null)}
+      open={blocker.state === 'blocked'}
+      onCancel={() => {
+        if (blocker.state === 'blocked') blocker.reset()
+      }}
       onDiscard={() => {
-        const target = discardTarget
-        historyGuardRef.current = false
-        setDiscardTarget(null)
-        if (target === 'history') navigate(-2)
-        else navigate('/my-decks')
+        if (blocker.state === 'blocked') blocker.proceed()
       }}
     />
   )
@@ -242,16 +233,28 @@ export function EditorPage() {
   }
 
   const requestError = queryErrorMessage([deckQuery.error, configQuery.error, statusQuery.error])
-  if (requestError || !deckQuery.data || !configQuery.data || !statusQuery.data) {
+  if (!deckQuery.data || !configQuery.data || !statusQuery.data) {
     return (
       <>
         <FailureView
           message={requestError ?? 'Unable to open this deck'}
           onBack={requestBack}
           onRetry={() => {
-            if (isRestoring) retryAfterRestore()
-            else void Promise.all([deckQuery.refetch(), configQuery.refetch(), statusQuery.refetch()])
+            void Promise.all([deckQuery.refetch(), configQuery.refetch(), statusQuery.refetch()])
           }}
+        />
+        {discardDialog}
+      </>
+    )
+  }
+
+  if (requestError && !isRestoring) {
+    return (
+      <>
+        <FailureView
+          message={requestError}
+          onBack={requestBack}
+          onRetry={() => void Promise.all([deckQuery.refetch(), configQuery.refetch(), statusQuery.refetch()])}
         />
         {discardDialog}
       </>
@@ -265,11 +268,8 @@ export function EditorPage() {
           message={editorError}
           onBack={requestBack}
           onRetry={() => {
-            if (isRestoring) retryAfterRestore()
-            else {
-              setEditorError(null)
-              setEditorAttempt((attempt) => attempt + 1)
-            }
+            setEditorError(null)
+            setEditorAttempt((attempt) => attempt + 1)
           }}
         />
         {discardDialog}
@@ -333,7 +333,17 @@ export function EditorPage() {
 
       <main className="h-[calc(100vh-48px)]">
         {isRestoring ? (
-          <div className="grid h-full place-items-center bg-slate-950 text-sm text-slate-300">Restoring version…</div>
+          <div className="grid h-full place-items-center bg-slate-950 p-6 text-center text-sm text-slate-300">
+            {restoreSyncError ? (
+              <div className="max-w-md">
+                <p className="text-base font-semibold text-amber-200">Restored version is synchronizing</p>
+                <p className="mt-2 text-sm text-slate-400">{restoreSyncError.message}</p>
+                <Button className="mt-4" disabled={isSyncRetrying} onClick={retryRestoreSynchronization}>
+                  {isSyncRetrying ? 'Retrying…' : 'Retry synchronization'}
+                </Button>
+              </div>
+            ) : 'Restoring version…'}
+          </div>
         ) : (
           <OnlyOfficeEditor
             key={`${currentStatus.current_version_id}:${editorAttempt}`}
@@ -351,12 +361,17 @@ export function EditorPage() {
         open={versionsOpen}
         interactionsDisabled={navigationBlocked}
         onClose={() => setVersionsOpen(false)}
-        onRestoringChange={setIsRestoring}
+        onRestoringChange={(restoring) => {
+          if (restoring) setRestoreSyncError(null)
+          setIsRestoring(restoring)
+        }}
         onRestored={(status) => {
+          setRestoreSyncError(null)
           setSaveState({ kind: 'confirmed', version: status.current_version_number })
         }}
-        onRestoreRefreshError={(message) => {
-          setEditorError(`Restored, but failed to refresh the editor: ${message}`)
+        onRestoreSyncError={(message, expected) => {
+          setRestoreSyncError({ message, expected })
+          setVersionsOpen(false)
         }}
       />
       {discardDialog}
@@ -374,21 +389,17 @@ function DiscardChangesDialog({
   onDiscard: () => void
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => {
-    if (open) cancelRef.current?.focus()
-  }, [open])
-  if (!open) return null
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-4">
-      <section role="dialog" aria-modal="true" aria-labelledby="discard-title" className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl">
+    <AccessibleModal open={open} labelledBy="discard-title" initialFocusRef={cancelRef} onRequestClose={onCancel} overlayClassName="z-[60] bg-black/70">
+      <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl">
         <h2 id="discard-title" className="text-lg font-semibold">Discard unsaved changes?</h2>
         <p className="mt-2 text-sm text-slate-400">The latest edits have not been confirmed in storage.</p>
         <div className="mt-5 flex justify-end gap-2">
           <button ref={cancelRef} type="button" onClick={onCancel} className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-400/60">Keep editing</button>
           <Button onClick={onDiscard}>Discard and leave</Button>
         </div>
-      </section>
-    </div>
+      </div>
+    </AccessibleModal>
   )
 }
 
