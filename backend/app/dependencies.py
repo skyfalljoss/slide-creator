@@ -111,8 +111,12 @@ def get_onlyoffice_service() -> OnlyOfficeService:
     return OnlyOfficeService(
         public_url=settings.onlyoffice_public_url,
         api_base_url=settings.onlyoffice_api_url,
+        internal_url=settings.onlyoffice_internal_url,
         jwt_secret=settings.onlyoffice_jwt_secret,
         file_token_ttl_seconds=settings.onlyoffice_file_token_ttl_seconds,
+        max_file_bytes=settings.onlyoffice_max_file_bytes,
+        authorization_enabled=settings.onlyoffice_enabled,
+        download_client=get_http_client(),
     )
 
 

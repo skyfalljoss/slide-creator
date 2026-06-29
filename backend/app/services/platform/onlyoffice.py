@@ -1,12 +1,15 @@
+import asyncio
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import urlencode, urlsplit
 
 import jwt
+import httpx
 
-from app.models.schemas import OnlyOfficeEditorConfig
+from app.models.schemas import OnlyOfficeCallback, OnlyOfficeEditorConfig
 from app.services.platform.deck_repository import DeckRecord
+from app.services.presentation.pptx_validation import validate_pptx
 
 
 TokenPurpose = Literal["content", "callback"]
@@ -20,6 +23,14 @@ class OnlyOfficeTokenError(ValueError):
 
 class OnlyOfficeConfigurationError(ValueError):
     """An ONLYOFFICE origin is missing or unsafe for signed configuration."""
+
+
+class OnlyOfficeAuthorizationError(ValueError):
+    """An ONLYOFFICE callback authorization token is invalid."""
+
+
+class OnlyOfficeDownloadError(ValueError):
+    """An ONLYOFFICE callback file could not be downloaded safely."""
 
 
 def _validated_http_origin(value: str, label: str) -> str:
@@ -52,17 +63,134 @@ class OnlyOfficeService:
         api_base_url: str,
         jwt_secret: str,
         file_token_ttl_seconds: int,
+        internal_url: str = "http://onlyoffice",
+        max_file_bytes: int = 50_000_000,
+        authorization_enabled: bool = False,
+        download_client: httpx.AsyncClient | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         if not jwt_secret:
             raise ValueError("ONLYOFFICE JWT secret must not be empty")
         if file_token_ttl_seconds <= 0:
             raise ValueError("ONLYOFFICE token lifetime must be positive")
+        if max_file_bytes <= 0:
+            raise ValueError("ONLYOFFICE maximum file size must be positive")
         self._public_url = public_url
         self._api_base_url = api_base_url
+        self._internal_url = _validated_http_origin(internal_url, "internal URL")
         self._jwt_secret = jwt_secret
         self._file_token_ttl_seconds = file_token_ttl_seconds
+        self._max_file_bytes = max_file_bytes
+        self._authorization_enabled = authorization_enabled
+        self._download_client = download_client
         self._now = now or (lambda: datetime.now(timezone.utc))
+
+    def validate_callback_authorization(
+        self,
+        authorization: str | None,
+        callback: OnlyOfficeCallback,
+    ) -> None:
+        if not self._authorization_enabled:
+            return
+        scheme, _, token = (authorization or "").partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            raise OnlyOfficeAuthorizationError("ONLYOFFICE authorization is missing")
+        try:
+            claims = jwt.decode(
+                token,
+                self._jwt_secret,
+                algorithms=[_TOKEN_ALGORITHM],
+                options={"verify_exp": False, "verify_iat": False},
+            )
+        except jwt.InvalidTokenError as exc:
+            raise OnlyOfficeAuthorizationError(
+                "ONLYOFFICE authorization is invalid"
+            ) from exc
+        signed_payload = claims.get("payload")
+        try:
+            signed_callback = OnlyOfficeCallback.model_validate(signed_payload)
+        except (TypeError, ValueError) as exc:
+            raise OnlyOfficeAuthorizationError(
+                "ONLYOFFICE authorization payload is invalid"
+            ) from exc
+        if signed_callback != callback:
+            raise OnlyOfficeAuthorizationError(
+                "ONLYOFFICE authorization does not match callback"
+            )
+
+    async def download_callback_file(self, url: str) -> bytes:
+        if self._download_client is None:
+            raise OnlyOfficeDownloadError("ONLYOFFICE download client is unavailable")
+        self._validate_download_url(url)
+        try:
+            async with self._download_client.stream(
+                "GET",
+                url,
+                follow_redirects=False,
+                timeout=httpx.Timeout(15.0, connect=5.0),
+            ) as response:
+                if response.is_redirect:
+                    raise OnlyOfficeDownloadError(
+                        "ONLYOFFICE download redirects are forbidden"
+                    )
+                if not response.is_success:
+                    raise OnlyOfficeDownloadError("ONLYOFFICE download failed")
+                content_length = response.headers.get("content-length")
+                if content_length is not None:
+                    try:
+                        declared_size = int(content_length)
+                    except ValueError as exc:
+                        raise OnlyOfficeDownloadError(
+                            "ONLYOFFICE download size is invalid"
+                        ) from exc
+                    if declared_size < 0 or declared_size > self._max_file_bytes:
+                        raise OnlyOfficeDownloadError(
+                            "ONLYOFFICE download exceeds maximum size"
+                        )
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > self._max_file_bytes:
+                        raise OnlyOfficeDownloadError(
+                            "ONLYOFFICE download exceeds maximum size"
+                        )
+                    chunks.append(chunk)
+        except OnlyOfficeDownloadError:
+            raise
+        except httpx.HTTPError as exc:
+            raise OnlyOfficeDownloadError("ONLYOFFICE download failed") from exc
+        content = b"".join(chunks)
+        try:
+            await asyncio.to_thread(
+                validate_pptx,
+                content,
+                max_bytes=self._max_file_bytes,
+            )
+        except ValueError as exc:
+            raise OnlyOfficeDownloadError("ONLYOFFICE download is not a PPTX") from exc
+        return content
+
+    def _validate_download_url(self, url: str) -> None:
+        try:
+            candidate = urlsplit(url)
+            configured = urlsplit(self._internal_url)
+            candidate_port = candidate.port or (443 if candidate.scheme == "https" else 80)
+            configured_port = configured.port or (
+                443 if configured.scheme == "https" else 80
+            )
+        except ValueError as exc:
+            raise OnlyOfficeDownloadError("ONLYOFFICE download URL is invalid") from exc
+        if (
+            candidate.scheme != configured.scheme
+            or candidate.hostname != configured.hostname
+            or candidate_port != configured_port
+            or candidate.username is not None
+            or candidate.password is not None
+            or not candidate.path.startswith("/")
+            or candidate.fragment
+        ):
+            raise OnlyOfficeDownloadError("ONLYOFFICE download origin is forbidden")
 
     def create_scoped_token(
         self,

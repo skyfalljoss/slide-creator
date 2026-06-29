@@ -1,12 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import asyncio
+
+import structlog
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import (
     get_deck_file_storage,
     get_deck_repository,
+    get_deck_version_service,
     get_onlyoffice_service,
 )
-from app.models.schemas import OnlyOfficeEditorConfig
+from app.models.schemas import OnlyOfficeCallback, OnlyOfficeEditorConfig
 from app.services.platform.auth import get_user_id
 from app.services.platform.deck_files import (
     DECK_STREAM_CHUNK_SIZE,
@@ -15,10 +19,16 @@ from app.services.platform.deck_files import (
     PPTX_CONTENT_TYPE,
 )
 from app.services.platform.deck_repository import DeckRepository
-from app.services.platform.onlyoffice import OnlyOfficeService, OnlyOfficeTokenError
+from app.services.platform.deck_versions import DeckVersionService
+from app.services.platform.onlyoffice import (
+    OnlyOfficeAuthorizationError,
+    OnlyOfficeService,
+    OnlyOfficeTokenError,
+)
 
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 class _DeckStreamingResponse(StreamingResponse):
@@ -103,3 +113,54 @@ async def get_deck_content(
             "Cache-Control": "private, no-store",
         },
     )
+
+
+@router.post("/decks/{deck_id}/callback")
+async def handle_onlyoffice_callback(
+    deck_id: str,
+    body: OnlyOfficeCallback,
+    token: str = Query(min_length=1),
+    authorization: str | None = Header(default=None),
+    onlyoffice: OnlyOfficeService = Depends(get_onlyoffice_service),
+    versions: DeckVersionService = Depends(get_deck_version_service),
+) -> dict[str, int]:
+    try:
+        claims = onlyoffice.decode_scoped_token(
+            token,
+            purpose="callback",
+            deck_id=deck_id,
+        )
+        onlyoffice.validate_callback_authorization(authorization, body)
+    except (OnlyOfficeTokenError, OnlyOfficeAuthorizationError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid callback authentication") from exc
+
+    if body.status in {1, 4}:
+        return {"error": 0}
+    if body.status in {3, 7}:
+        return {"error": 1}
+    if body.status not in {2, 6} or body.url is None:
+        return {"error": 1}
+
+    owner_id = str(claims["sub"])
+    base_version_id = str(claims["version_id"])
+    try:
+        content = await onlyoffice.download_callback_file(body.url)
+        await versions.save_edited_version(
+            deck_id=deck_id,
+            owner_id=owner_id,
+            content=content,
+            base_version_id=base_version_id,
+            callback_key=f"{body.key}:{body.status}:{body.userdata or ''}",
+            created_by=owner_id,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        await logger.aerror(
+            "onlyoffice_callback_failed",
+            deck_id=deck_id,
+            status=body.status,
+            failure_type=type(exc).__name__,
+        )
+        return {"error": 1}
+    return {"error": 0}

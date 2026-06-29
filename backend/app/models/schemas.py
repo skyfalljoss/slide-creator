@@ -167,6 +167,14 @@ class OnlyOfficeEditorConfig(BaseModel):
     config: dict[str, object]
 
 
+class OnlyOfficeCallback(BaseModel):
+    key: str
+    status: int
+    url: str | None = None
+    users: list[str] = Field(default_factory=list)
+    userdata: str | None = None
+
+
 class UploadResponse(BaseModel):
     file_id: str
     filename: str
