@@ -135,6 +135,11 @@ Run these from the project root unless noted otherwise.
 | `make dev` | Start backend and frontend together |
 | `make backend` | Start only the backend server |
 | `make frontend` | Start only the frontend server |
+| `make stack-up` | Build and start the internal Docker stack |
+| `make stack-down` | Stop the stack without deleting durable volumes |
+| `make stack-logs` | Follow application and editor logs |
+| `make migrate` | Apply database migrations outside Docker |
+| `make backup` | Back up PostgreSQL to the configured GCS URI |
 | `cd backend && uv run pytest` | Run backend tests |
 | `cd backend && uv run ruff check app/ tests/` | Run backend lint |
 | `cd frontend && pnpm test` | Run frontend tests |
@@ -189,3 +194,129 @@ All API routes are under `/api/v1`.
 | `POST /generate` | Generate a deck |
 | `POST /refine` | Refine one slide |
 | `POST /export` | Export a deck to PPTX |
+
+## Internal Docker Deployment
+
+The production-shaped Compose stack runs PostgreSQL 16, the FastAPI backend,
+ONLYOFFICE Docs Community 9.4, and the Nginx-served frontend on one VM. Only
+Nginx publishes a host port. PostgreSQL, the backend, and ONLYOFFICE remain on
+the private Compose network.
+
+For a small internal deployment (fewer than ten concurrent users), start with
+an 8 GB RAM VM and monitor memory and CPU during real editing sessions. The
+Compose limits prevent a single service from consuming the whole VM; adjust
+them only after measuring usage.
+
+### Configure and start
+
+1. Install Docker Engine, the Compose plugin, and Google Cloud CLI on the VM.
+2. Copy `.env.example` to `.env`.
+3. Generate separate secrets instead of using the example values:
+
+   ```bash
+   openssl rand -base64 32
+   openssl rand -base64 32
+   ```
+
+   Store one result in `POSTGRES_PASSWORD` and the other in
+   `ONLYOFFICE_JWT_SECRET`. Never commit `.env`; it is ignored by Git.
+
+4. Set `PUBLIC_APP_URL` to the browser-visible origin and
+   `ONLYOFFICE_PUBLIC_URL` to the same origin plus `/onlyoffice`, for example
+   `https://slides.internal.example/onlyoffice`. Provision the internal DNS
+   record first.
+5. Use `STORAGE_PROVIDER=local` for the named `deck-files` volume, or set it to
+   `gcs` and configure `GCP_PROJECT_ID` and `GCS_BUCKET`. On GCE, grant the VM
+   service account access to the bucket instead of placing a service-account
+   key in `.env`.
+6. Validate and start:
+
+   ```bash
+   docker compose --env-file .env config
+   make stack-up
+   docker compose ps
+   curl --fail http://127.0.0.1/healthz
+   ```
+
+The backend container applies Alembic migrations before Uvicorn starts. A
+migration failure therefore stops that container instead of serving against an
+old schema.
+
+ONLYOFFICE is pinned to `onlyoffice/documentserver:9.4.0.1` and uses JWT on
+every editor request. Its document fetches target the backend's private
+`http://backend:8000` origin, so `ALLOW_PRIVATE_IP_ADDRESS=true` is required;
+the service is deliberately not published on the VM. Nginx removes the
+`/onlyoffice/` prefix when proxying and forwards its external virtual path and
+WebSocket headers. The editor's Data, logs, application library, and bundled
+database paths use named volumes so container replacement does not discard
+state.
+
+Terminate HTTPS at an internal load balancer or trusted reverse proxy before
+production use. Forward the original host and protocol to this stack, restrict
+the VM firewall to that proxy and administrative access, and do not expose the
+ONLYOFFICE container directly.
+
+### Nightly database backups
+
+Set `BACKUP_GCS_URI` to a private `gs://` prefix. The backup script streams
+`pg_dump` from PostgreSQL, compresses it into a permission-restricted temporary
+file, uploads it with `gcloud storage`, and always removes the temporary file.
+The VM identity needs object-creation permission on the backup bucket.
+
+Install `/etc/systemd/system/slideforge-backup.service`:
+
+```ini
+[Unit]
+Description=Back up SlideForge PostgreSQL to GCS
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=slideforge
+WorkingDirectory=/opt/slideforge
+EnvironmentFile=/opt/slideforge/.env
+ExecStart=/opt/slideforge/deploy/backup-postgres.sh
+```
+
+Install `/etc/systemd/system/slideforge-backup.timer`:
+
+```ini
+[Unit]
+Description=Run the SlideForge backup nightly
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it with:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now slideforge-backup.timer
+sudo systemctl list-timers slideforge-backup.timer
+```
+
+### Restore drill
+
+Run this drill regularly against a disposable database, not the live
+`slideforge` database. Select a backup object, restore it, inspect representative
+rows, and then remove the drill database:
+
+```bash
+docker compose exec -T postgres createdb -U slideforge slideforge_restore
+gcloud storage cat gs://BUCKET/PREFIX/slideforge-TIMESTAMP.sql.gz \
+  | gzip -dc \
+  | docker compose exec -T postgres psql -U slideforge -d slideforge_restore
+docker compose exec -T postgres psql -U slideforge -d slideforge_restore \
+  -c 'SELECT count(*) FROM decks;'
+docker compose exec -T postgres dropdb -U slideforge slideforge_restore
+```
+
+If a drill fails, retain the command output, correct the backup or permission
+problem, and repeat the drill before treating backups as recoverable.

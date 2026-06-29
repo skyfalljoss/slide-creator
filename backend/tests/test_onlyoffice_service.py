@@ -125,6 +125,48 @@ def test_editor_config_rejects_invalid_document_server_origin(public_url: str):
         invalid.build_editor_config(deck=_deck(), user_id="alice", user_name="Alice")
 
 
+def test_editor_config_preserves_normalized_document_server_proxy_path():
+    proxied = OnlyOfficeService(
+        public_url="https://slides.internal.example/onlyoffice/",
+        api_base_url="http://api:8000",
+        jwt_secret=SECRET,
+        file_token_ttl_seconds=300,
+        now=lambda: NOW,
+    )
+
+    config = proxied.build_editor_config(
+        deck=_deck(), user_id="alice", user_name="Alice"
+    )
+
+    assert config.document_server_url == (
+        "https://slides.internal.example/onlyoffice"
+    )
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://slides.internal.example/onlyoffice?next=evil",
+        "https://slides.internal.example/onlyoffice#fragment",
+        "https://user:password@slides.internal.example/onlyoffice",
+        "https://slides.internal.example/onlyoffice/../admin",
+        "https://slides.internal.example/onlyoffice%2f..%2fadmin",
+        "https://slides.internal.example/onlyoffice%252f..%252fadmin",
+    ],
+)
+def test_editor_config_rejects_unsafe_document_server_proxy_paths(public_url: str):
+    invalid = OnlyOfficeService(
+        public_url=public_url,
+        api_base_url="http://api:8000",
+        jwt_secret=SECRET,
+        file_token_ttl_seconds=300,
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(OnlyOfficeConfigurationError, match="public URL"):
+        invalid.build_editor_config(deck=_deck(), user_id="alice", user_name="Alice")
+
+
 @pytest.mark.parametrize("purpose", ["content", "callback"])
 def test_scoped_token_contains_required_identity_claims(
     service: OnlyOfficeService, purpose: str

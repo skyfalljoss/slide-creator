@@ -1,0 +1,14 @@
+.git
+.worktrees
+**/.DS_Store
+**/.env
+**/.venv
+**/node_modules
+**/.pnpm-store
+**/.pytest_cache
+**/.ruff_cache
+**/__pycache__
+**/dist
+backend/.data
+backend/.exports
+backend/.uploads

@@ -43,6 +43,15 @@ def test_onlyoffice_requires_jwt_secret_when_enabled(monkeypatch):
         validate_settings(configured)
 
 
+def test_onlyoffice_public_url_preserves_virtual_proxy_path():
+    configured = Settings(
+        _env_file=None,
+        onlyoffice_public_url="https://slides.internal.example/onlyoffice",
+    )
+
+    assert configured.onlyoffice_public_url.endswith("/onlyoffice")
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

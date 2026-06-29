@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Literal
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 
 import jwt
 import httpx
@@ -52,6 +52,34 @@ def _validated_http_origin(value: str, label: str) -> str:
         or parsed.query
         or parsed.fragment
         or any(character.isspace() for character in value)
+    ):
+        raise OnlyOfficeConfigurationError(f"ONLYOFFICE {label} is invalid")
+    if port is not None and not 1 <= port <= 65535:
+        raise OnlyOfficeConfigurationError(f"ONLYOFFICE {label} is invalid")
+    return value.rstrip("/")
+
+
+def _validated_http_base_url(value: str, label: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        decoded_path = unquote(parsed.path)
+    except ValueError as exc:
+        raise OnlyOfficeConfigurationError(f"ONLYOFFICE {label} is invalid") from exc
+    path_segments = decoded_path.split("/")
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or any(character.isspace() for character in value)
+        or "\\" in parsed.netloc
+        or "\\" in decoded_path
+        or "%" in parsed.path
+        or "//" in decoded_path
+        or any(segment in {".", ".."} for segment in path_segments)
     ):
         raise OnlyOfficeConfigurationError(f"ONLYOFFICE {label} is invalid")
     if port is not None and not 1 <= port <= 65535:
@@ -304,7 +332,7 @@ class OnlyOfficeService:
             version_id=version.id,
             purpose="callback",
         )
-        public_url = _validated_http_origin(self._public_url, "public URL")
+        public_url = _validated_http_base_url(self._public_url, "public URL")
         api_base_url = _validated_http_origin(self._api_base_url, "API URL")
         content_url = self._resource_url(
             api_base_url, deck.id, "content", content_token
