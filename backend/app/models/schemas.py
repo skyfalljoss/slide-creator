@@ -1,5 +1,5 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from typing import Annotated, Literal
 from datetime import datetime
 
 SlideVariant = Literal[
@@ -234,8 +234,14 @@ class DeckDetail(BaseModel):
     updated_at: str
 
 
+DeckName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+]
+
+
 class SaveDeckRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=500)
+    name: DeckName
     deck_type: str
     theme: str = "minimalist"
     aspect_ratio: str = "16:9"
@@ -244,12 +250,12 @@ class SaveDeckRequest(BaseModel):
 
 
 class UpdateDeckRequest(BaseModel):
-    name: str | None = Field(default=None, max_length=500)
+    name: DeckName | None = None
     slides: list[SlideData] | None = None
 
 
 class RenameDeckRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=500)
+    name: DeckName
 
 
 class SaveDeckResponse(BaseModel):

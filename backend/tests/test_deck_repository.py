@@ -557,7 +557,10 @@ async def test_stale_versions_and_protected_row_deletion(repository):
     with pytest.raises(ValueError, match="keep"):
         await repo.stale_versions("deck-1", keep=0)
 
-    await repo.delete_version_rows(["version-1", "version-2", "version-4"])
+    deleted = await repo.delete_version_rows(
+        ["version-1", "version-2", "version-4"]
+    )
+    assert deleted == ["version-1", "version-2"]
     assert [item.id for item in await repo.list_versions("deck-1", "owner-1")] == [
         "version-4",
         "version-3",

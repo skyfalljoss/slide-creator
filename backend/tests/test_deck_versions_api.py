@@ -16,6 +16,11 @@ async def test_status_history_restore_rename_and_download(deck_api):
             json={"slides": _slides(f"Version {number}")},
         )
         assert response.status_code == 200
+        if number == 2:
+            version_two = await repository.get(deck_id, "alice")
+            assert version_two is not None and version_two.current_version is not None
+            version_two_key = version_two.current_version.storage_key
+            version_two_bytes = await storage.read(version_two_key)
 
     history = await client.get(
         f"/api/v1/decks/{deck_id}/versions", headers=headers
@@ -38,6 +43,17 @@ async def test_status_history_restore_rename_and_download(deck_api):
     assert restored.json()["current_version_number"] == 7
     assert restored.json()["current_version_id"] != version_two_id
 
+    restored_history = await client.get(
+        f"/api/v1/decks/{deck_id}/versions", headers=headers
+    )
+    assert [item["version_number"] for item in restored_history.json()["versions"]] == [
+        7,
+        6,
+        5,
+        4,
+        3,
+    ]
+
     renamed = await client.patch(
         f"/api/v1/decks/{deck_id}", headers=headers, json={"name": "Final Deck"}
     )
@@ -50,6 +66,8 @@ async def test_status_history_restore_rename_and_download(deck_api):
     downloaded = await client.get(f"/api/v1/decks/{deck_id}/download", headers=headers)
     assert downloaded.status_code == 200
     assert downloaded.content == expected
+    assert downloaded.content == version_two_bytes
+    assert await storage.exists(version_two_key) is False
     assert downloaded.headers["content-type"].startswith(
         "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     )
@@ -94,3 +112,20 @@ async def test_history_routes_are_all_owner_scoped(deck_api):
     ]
 
     assert [response.status_code for response in responses] == [404, 404, 404, 404]
+
+
+@pytest.mark.asyncio
+async def test_cross_user_cannot_export_or_preview_persisted_deck(deck_api):
+    client, _repository, _storage = deck_api
+    deck_id = (await _create(client)).json()["id"]
+    headers = {"x-user-id": "bob"}
+
+    exported = await client.post(
+        "/api/v1/export", headers=headers, json={"deck_id": deck_id}
+    )
+    previewed = await client.get(
+        f"/api/v1/decks/{deck_id}/preview", headers=headers
+    )
+
+    assert exported.status_code == 404
+    assert previewed.status_code == 404

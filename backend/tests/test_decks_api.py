@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 
 from app import dependencies
 from app.main import app
@@ -124,6 +125,66 @@ async def test_legacy_update_persists_slides_before_rename(deck_api):
     assert deck.current_version.version_number == 2
     assert deck.current_version.source == "generated"
     assert deck.generation_payload["slides"][0]["title"] == "Updated"
+
+
+@pytest.mark.asyncio
+async def test_legacy_update_rolls_back_version_and_name_when_atomic_write_fails(
+    deck_api,
+):
+    client, repository, storage = deck_api
+    deck_id = (await _create(client, name="Original")).json()["id"]
+    original = await repository.get(deck_id, "alice")
+    assert original is not None and original.current_version is not None
+    original_key = original.current_version.storage_key
+
+    def reject_name_update(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ):
+        if statement.lstrip().upper().startswith("UPDATE DECKS SET NAME"):
+            raise RuntimeError("rename write failed")
+
+    event.listen(
+        repository._database.engine.sync_engine,
+        "before_cursor_execute",
+        reject_name_update,
+    )
+    try:
+        response = await client.put(
+            f"/api/v1/decks/{deck_id}",
+            headers={"x-user-id": "alice"},
+            json={"name": "Renamed", "slides": _slides("Updated")},
+        )
+    finally:
+        event.remove(
+            repository._database.engine.sync_engine,
+            "before_cursor_execute",
+            reject_name_update,
+        )
+
+    assert response.status_code == 500
+    deck = await repository.get(deck_id, "alice")
+    assert deck is not None and deck.current_version is not None
+    assert deck.name == "Original"
+    assert deck.current_version.id == original.current_version.id
+    assert [version.id for version in await repository.list_versions(deck_id, "alice")] == [
+        original.current_version.id
+    ]
+    assert await storage.list_keys(f"decks/{deck_id}/") == [original_key]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["put", "patch"])
+async def test_rename_rejects_whitespace_only_name(deck_api, method):
+    client, _repository, _storage = deck_api
+    deck_id = (await _create(client)).json()["id"]
+
+    response = await getattr(client, method)(
+        f"/api/v1/decks/{deck_id}",
+        headers={"x-user-id": "alice"},
+        json={"name": "   "},
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

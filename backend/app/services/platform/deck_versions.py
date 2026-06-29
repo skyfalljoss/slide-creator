@@ -135,7 +135,9 @@ class DeckVersionService:
         async with self._coordinate(version_id):
             existing = await self._repository.version(deck_id, version_id, owner_id)
             if existing is not None:
-                return self._matching_version(existing, checksum)
+                result = self._matching_version(existing, checksum)
+                await self._enforce_retention(deck_id)
+                return result
             if await self._repository.get(deck_id, owner_id) is None:
                 raise DeckNotFoundError("Deck not found")
 
@@ -219,6 +221,7 @@ class DeckVersionService:
         theme: str,
         aspect_ratio: str,
         created_by: str,
+        name: str | None = None,
     ) -> DeckVersionRecord:
         deck = await self._repository.get(deck_id, owner_id)
         if deck is None or deck.current_version is None:
@@ -239,6 +242,7 @@ class DeckVersionService:
             generation_payload={
                 "slides": [item.model_dump(mode="json") for item in slides]
             },
+            name=name,
         )
 
     async def _append_content(
@@ -251,6 +255,7 @@ class DeckVersionService:
         created_by: str,
         base_version_id: str,
         generation_payload: dict | None = None,
+        name: str | None = None,
     ) -> DeckVersionRecord:
         checksum = await self._validate_and_hash(content)
         version_id = str(uuid4())
@@ -268,6 +273,7 @@ class DeckVersionService:
                 created_by=created_by,
                 base_version_id=base_version_id,
                 generation_payload=generation_payload,
+                name=name,
             )
         except asyncio.CancelledError:
             raise
@@ -362,30 +368,33 @@ class DeckVersionService:
             logger.exception("deck_version_retention_query_failed", deck_id=deck_id)
             return
 
-        deleted_ids: list[str] = []
+        if not stale_versions:
+            return
+        try:
+            deleted_ids = await self._repository.delete_version_rows(
+                [version.id for version in stale_versions]
+            )
+        except Exception as exc:
+            logger.warning(
+                "deck_version_retention_row_delete_failed",
+                deck_id=deck_id,
+                failure_type=type(exc).__name__,
+            )
+            return
+
+        deleted = set(deleted_ids)
         for version in stale_versions:
+            if version.id not in deleted:
+                continue
             try:
                 await self._storage.delete(version.storage_key)
-            except Exception:
-                logger.exception(
+            except Exception as exc:
+                logger.warning(
                     "deck_version_retention_object_delete_failed",
                     deck_id=deck_id,
                     version_id=version.id,
-                    storage_key=version.storage_key,
+                    failure_type=type(exc).__name__,
                 )
-            else:
-                deleted_ids.append(version.id)
-
-        if not deleted_ids:
-            return
-        try:
-            await self._repository.delete_version_rows(deleted_ids)
-        except Exception:
-            logger.exception(
-                "deck_version_retention_row_delete_failed",
-                deck_id=deck_id,
-                version_ids=deleted_ids,
-            )
 
     async def _resolve_existing_version(
         self,

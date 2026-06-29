@@ -4,11 +4,12 @@ from urllib.parse import parse_qs, urlparse
 
 import jwt
 import pytest
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
 from app import dependencies
 from app.main import app
-from app.routers.onlyoffice import get_deck_content
+from app.routers.onlyoffice import download_deck, get_deck_content
 from app.services.platform.deck_files import PPTX_CONTENT_TYPE
 from app.services.platform.deck_repository import DeckRecord, DeckVersionRecord
 from app.services.platform.onlyoffice import OnlyOfficeService
@@ -139,6 +140,112 @@ async def test_owner_receives_editor_config_and_private_pptx(onlyoffice_client):
     assert storage.opened_keys == ["decks/deck-1/versions/version-1.pptx"]
     assert storage.requested_chunk_sizes == [256 * 1024]
     assert storage.closed is True
+    assert storage.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_direct_download_streams_current_pptx_and_closes_once(onlyoffice_client):
+    client, _service, storage = onlyoffice_client
+
+    response = await client.get(
+        "/api/v1/decks/deck-1/download",
+        headers={"x-user-id": "alice"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == PPTX_BYTES
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="Private Deck.pptx"'
+    )
+    assert storage.opened_keys == ["decks/deck-1/versions/version-1.pptx"]
+    assert storage.requested_chunk_sizes == [256 * 1024]
+    assert storage.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_direct_download_maps_missing_object_before_streaming(onlyoffice_client):
+    client, _service, storage = onlyoffice_client
+
+    async def missing_stream(_key: str, chunk_size: int):
+        del chunk_size
+        raise FileNotFoundError("missing")
+
+    storage.open_stream = missing_stream
+    response = await client.get(
+        "/api/v1/decks/deck-1/download",
+        headers={"x-user-id": "alice"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Deck content not found"}
+
+
+def _download_scope() -> dict:
+    return {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/decks/deck-1/download",
+        "raw_path": b"/api/v1/decks/deck-1/download",
+        "query_string": b"",
+        "headers": [(b"x-user-id", b"alice")],
+        "client": ("127.0.0.1", 1234),
+        "server": ("test", 80),
+        "root_path": "",
+    }
+
+
+async def _direct_download_response(storage: FakeStorage):
+    return await download_deck(
+        deck_id="deck-1",
+        request=Request(_download_scope()),
+        repository=FakeRepository(),
+        storage=storage,
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_download_closes_stream_when_headers_fail():
+    storage = FakeStorage()
+    response = await _direct_download_response(storage)
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def fail_on_start(message):
+        assert message["type"] == "http.response.start"
+        raise RuntimeError("send failed")
+
+    with pytest.raises(RuntimeError, match="send failed"):
+        await response(_download_scope(), receive, fail_on_start)
+
+    assert storage.next_calls == 0
+    assert storage.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_direct_download_closes_stream_when_cancelled_before_headers():
+    storage = FakeStorage()
+    response = await _direct_download_response(storage)
+    entered = asyncio.Event()
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def block_start(message):
+        assert message["type"] == "http.response.start"
+        entered.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(response(_download_scope(), receive, block_start))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert storage.next_calls == 0
     assert storage.close_calls == 1
 
 

@@ -133,10 +133,11 @@ async def update_deck(
                 theme=deck.theme,
                 aspect_ratio=deck.aspect_ratio,
                 created_by=owner_id,
+                name=req.name,
             )
         except DeckNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Deck not found") from exc
-    if req.name is not None:
+    if req.name is not None and req.slides is None:
         if not await repository.rename(deck_id, owner_id, req.name):
             raise HTTPException(status_code=404, detail="Deck not found")
 

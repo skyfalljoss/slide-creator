@@ -376,6 +376,7 @@ class DeckRepository:
         created_by: str,
         base_version_id: str | None = None,
         generation_payload: dict | None = None,
+        name: str | None = None,
     ) -> DeckVersionRecord:
         now = datetime.now(timezone.utc)
         async with self._database.session() as session:
@@ -424,6 +425,9 @@ class DeckRepository:
                 deck.updated_at = now
                 if generation_payload is not None:
                     deck.generation_payload = generation_payload
+                if name is not None:
+                    deck.name = name
+                await session.flush()
             return _version_record(version)
 
     async def version(
@@ -464,9 +468,9 @@ class DeckRepository:
                 if row.id != deck.current_version_id
             ]
 
-    async def delete_version_rows(self, version_ids: list[str]) -> None:
+    async def delete_version_rows(self, version_ids: list[str]) -> list[str]:
         if not version_ids:
-            return
+            return []
         async with self._database.session() as session:
             async with _serialized_write(session):
                 current_ids = set(
@@ -483,6 +487,11 @@ class DeckRepository:
                             DeckVersionRow.id.in_(deletable_ids)
                         )
                     )
+                return [
+                    version_id
+                    for version_id in dict.fromkeys(version_ids)
+                    if version_id in deletable_ids
+                ]
 
     async def all_storage_keys(self) -> set[str]:
         async with self._database.session() as session:

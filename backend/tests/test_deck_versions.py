@@ -222,12 +222,13 @@ class VersionRepository:
         current_id = self.current.current_version_id if self.current is not None else None
         return [version for version in ordered[keep:] if version.id != current_id]
 
-    async def delete_version_rows(self, version_ids: list[str]) -> None:
+    async def delete_version_rows(self, version_ids: list[str]) -> list[str]:
         self.deleted_row_batches.append(version_ids)
         if self.delete_rows_error:
             raise self.delete_rows_error
         for version_id in version_ids:
             self.versions.pop(version_id, None)
+        return version_ids
 
 
 @pytest.mark.asyncio
@@ -1047,7 +1048,7 @@ async def test_retention_keeps_newest_five_after_sixth_version():
 
 
 @pytest.mark.asyncio
-async def test_retention_leaves_row_when_object_delete_fails():
+async def test_retention_commits_row_delete_before_best_effort_object_cleanup():
     initial = version_record(version_id="initial")
     repository = VersionRepository(deck_record(initial))
     storage = FakeStorage()
@@ -1058,13 +1059,13 @@ async def test_retention_leaves_row_when_object_delete_fails():
     for number in range(1, 6):
         await save_editor_revision(service, number)
 
-    assert initial.id in repository.versions
+    assert initial.id not in repository.versions
     assert initial.storage_key in storage.objects
-    assert all(initial.id not in batch for batch in repository.deleted_row_batches)
+    assert any(initial.id in batch for batch in repository.deleted_row_batches)
 
 
 @pytest.mark.asyncio
-async def test_retention_row_cleanup_failure_does_not_fail_committed_save():
+async def test_retention_row_cleanup_failure_preserves_object_and_committed_save():
     initial = version_record(version_id="initial")
     repository = VersionRepository(deck_record(initial))
     repository.delete_rows_error = RuntimeError("row cleanup failed")
@@ -1078,4 +1079,46 @@ async def test_retention_row_cleanup_failure_does_not_fail_committed_save():
     assert repository.current is not None
     assert repository.current.current_version_id == result.id
     assert initial.id in repository.versions
-    assert initial.storage_key not in storage.objects
+    assert initial.storage_key in storage.objects
+    assert "delete" not in storage.events
+
+
+@pytest.mark.asyncio
+async def test_idempotent_callback_retry_recovers_interrupted_retention():
+    content = pptx_bytes("existing callback")
+    checksum = hashlib.sha256(content).hexdigest()
+    callback_key = "callback-existing"
+    existing_id = str(
+        uuid5(NAMESPACE_URL, f"slideforge:deck-1:{callback_key}:{checksum}")
+    )
+    existing = version_record(
+        version_id=existing_id,
+        version_number=6,
+        sha256=checksum,
+        source="onlyoffice_save",
+    )
+    repository = VersionRepository(deck_record(existing))
+    storage = FakeStorage()
+    storage.objects[existing.storage_key] = content
+    for number in range(1, 6):
+        old = version_record(
+            version_id=f"old-{number}",
+            version_number=number,
+        )
+        repository.versions[old.id] = old
+        storage.objects[old.storage_key] = pptx_bytes(f"old-{number}")
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    result = await service.save_edited_version(
+        deck_id="deck-1",
+        owner_id="owner-1",
+        content=content,
+        base_version_id="old-5",
+        callback_key=callback_key,
+        created_by="editor",
+    )
+
+    assert result == existing
+    assert len(repository.versions) == 5
+    assert "old-1" not in repository.versions
+    assert "decks/deck-1/versions/old-1.pptx" not in storage.objects

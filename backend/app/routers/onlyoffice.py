@@ -4,7 +4,7 @@ import unicodedata
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from app.dependencies import (
     get_deck_file_storage,
@@ -142,17 +142,26 @@ async def download_deck(
     request: Request,
     repository: DeckRepository = Depends(get_deck_repository),
     storage: DeckFileStorage = Depends(get_deck_file_storage),
-) -> Response:
+) -> StreamingResponse:
     deck = await repository.get(deck_id, get_user_id(request))
     if deck is None or deck.current_version is None:
         raise HTTPException(status_code=404, detail="Deck not found")
     try:
-        content = await storage.read(deck.current_version.storage_key)
+        stream = await storage.open_stream(
+            deck.current_version.storage_key,
+            chunk_size=DECK_STREAM_CHUNK_SIZE,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Deck content not found") from exc
     filename = _attachment_filename(deck.name)
-    return Response(
-        content=content,
+
+    async def stream_content():
+        async for chunk in stream:
+            yield chunk
+
+    return _DeckStreamingResponse(
+        stream_content(),
+        deck_stream=stream,
         media_type=PPTX_CONTENT_TYPE,
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
