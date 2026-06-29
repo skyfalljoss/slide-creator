@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
@@ -7,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app import dependencies
 from app.main import app
+from app.routers.onlyoffice import get_deck_content
 from app.services.platform.deck_files import PPTX_CONTENT_TYPE
 from app.services.platform.deck_repository import DeckRecord, DeckVersionRecord
 from app.services.platform.onlyoffice import OnlyOfficeService
@@ -56,6 +58,8 @@ class FakeStorage:
         self.opened_keys: list[str] = []
         self.requested_chunk_sizes: list[int] = []
         self.closed = False
+        self.close_calls = 0
+        self.next_calls = 0
 
     async def read(self, key: str) -> bytes:
         raise AssertionError(f"content route must not buffer the whole object: {key}")
@@ -73,12 +77,14 @@ class FakeStorage:
                 return self
 
             async def __anext__(self):
+                storage.next_calls += 1
                 try:
                     return next(self._chunks)
                 except StopIteration as exc:
                     raise StopAsyncIteration from exc
 
             async def aclose(self):
+                storage.close_calls += 1
                 storage.closed = True
 
         return Stream()
@@ -133,6 +139,7 @@ async def test_owner_receives_editor_config_and_private_pptx(onlyoffice_client):
     assert storage.opened_keys == ["decks/deck-1/versions/version-1.pptx"]
     assert storage.requested_chunk_sizes == [256 * 1024]
     assert storage.closed is True
+    assert storage.close_calls == 1
 
 
 @pytest.mark.asyncio
@@ -230,3 +237,106 @@ async def test_content_maps_missing_object_to_404(onlyoffice_client):
     response = await client.get(f"/api/v1/decks/deck-1/content?token={token}")
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_content_stream_closes_if_response_start_send_fails(onlyoffice_client):
+    _client, service, storage = onlyoffice_client
+    token = service.create_scoped_token(
+        subject="alice",
+        deck_id="deck-1",
+        version_id="version-1",
+        purpose="content",
+    )
+    response = await get_deck_content(
+        deck_id="deck-1",
+        token=token,
+        repository=FakeRepository(),
+        storage=storage,
+        onlyoffice=service,
+    )
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def fail_on_start(message):
+        assert message["type"] == "http.response.start"
+        raise RuntimeError("send failed")
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/decks/deck-1/content",
+        "raw_path": b"/api/v1/decks/deck-1/content",
+        "query_string": b"",
+        "headers": [],
+        "client": ("127.0.0.1", 1234),
+        "server": ("test", 80),
+        "root_path": "",
+    }
+
+    with pytest.raises(RuntimeError, match="send failed"):
+        await response(scope, receive, fail_on_start)
+
+    assert storage.next_calls == 0
+    assert storage.close_calls == 1
+    assert storage.closed is True
+
+
+@pytest.mark.asyncio
+async def test_content_stream_closes_if_cancelled_during_response_start(
+    onlyoffice_client,
+):
+    _client, service, storage = onlyoffice_client
+    token = service.create_scoped_token(
+        subject="alice",
+        deck_id="deck-1",
+        version_id="version-1",
+        purpose="content",
+    )
+    response = await get_deck_content(
+        deck_id="deck-1",
+        token=token,
+        repository=FakeRepository(),
+        storage=storage,
+        onlyoffice=service,
+    )
+    start_send_entered = asyncio.Event()
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def block_response_start(message):
+        assert message["type"] == "http.response.start"
+        start_send_entered.set()
+        await asyncio.Event().wait()
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/decks/deck-1/content",
+        "raw_path": b"/api/v1/decks/deck-1/content",
+        "query_string": b"",
+        "headers": [],
+        "client": ("127.0.0.1", 1234),
+        "server": ("test", 80),
+        "root_path": "",
+    }
+    response_task = asyncio.create_task(
+        response(scope, receive, block_response_start)
+    )
+    await start_send_entered.wait()
+    response_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await response_task
+
+    assert storage.next_calls == 0
+    assert storage.close_calls == 1
+    assert storage.closed is True

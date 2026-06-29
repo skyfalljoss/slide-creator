@@ -10,6 +10,7 @@ from app.models.schemas import OnlyOfficeEditorConfig
 from app.services.platform.auth import get_user_id
 from app.services.platform.deck_files import (
     DECK_STREAM_CHUNK_SIZE,
+    DeckFileStream,
     DeckFileStorage,
     PPTX_CONTENT_TYPE,
 )
@@ -18,6 +19,18 @@ from app.services.platform.onlyoffice import OnlyOfficeService, OnlyOfficeTokenE
 
 
 router = APIRouter()
+
+
+class _DeckStreamingResponse(StreamingResponse):
+    def __init__(self, *args, deck_stream: DeckFileStream, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._deck_stream = deck_stream
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self._deck_stream.aclose()
 
 
 @router.get(
@@ -78,14 +91,12 @@ async def get_deck_content(
         raise HTTPException(status_code=404, detail="Deck content not found") from exc
 
     async def stream_content():
-        try:
-            async for chunk in stream:
-                yield chunk
-        finally:
-            await stream.aclose()
+        async for chunk in stream:
+            yield chunk
 
-    return StreamingResponse(
+    return _DeckStreamingResponse(
         stream_content(),
+        deck_stream=stream,
         media_type=PPTX_CONTENT_TYPE,
         headers={
             "Content-Disposition": "inline; filename=deck.pptx",
