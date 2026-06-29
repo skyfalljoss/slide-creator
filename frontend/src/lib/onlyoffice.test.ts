@@ -13,21 +13,45 @@ describe('loadOnlyOfficeApi', () => {
     vi.resetModules()
   })
 
-  it('canonicalizes equivalent HTTP origins and shares their promise and script', async () => {
+  it('canonicalizes equivalent proxy base URLs and shares their promise and script', async () => {
     const { loadOnlyOfficeApi } = await import('./onlyoffice')
 
-    const first = loadOnlyOfficeApi(' HTTPS://OFFICE.EXAMPLE.TEST:443/a/path/ ')
-    const second = loadOnlyOfficeApi('https://office.example.test')
+    const first = loadOnlyOfficeApi(' HTTPS://OFFICE.EXAMPLE.TEST:443/onlyoffice/// ')
+    const second = loadOnlyOfficeApi('https://office.example.test/onlyoffice')
     const scripts = document.querySelectorAll('script')
 
     expect(first).toBe(second)
     expect(scripts).toHaveLength(1)
-    expect(scripts[0]?.src).toBe('https://office.example.test/web-apps/apps/api/documents/api.js')
+    expect(scripts[0]?.src).toBe('https://office.example.test/onlyoffice/web-apps/apps/api/documents/api.js')
 
     window.DocsAPI = { DocEditor: vi.fn() }
     scripts[0]?.dispatchEvent(new Event('load'))
 
     await expect(first).resolves.toBe(window.DocsAPI)
+  })
+
+  it('normalizes the root path without creating a double slash', async () => {
+    const { loadOnlyOfficeApi } = await import('./onlyoffice')
+    const loading = loadOnlyOfficeApi('https://office.example.test///')
+
+    expect(document.querySelector('script')?.src).toBe(
+      'https://office.example.test/web-apps/apps/api/documents/api.js',
+    )
+    window.DocsAPI = { DocEditor: vi.fn() }
+    document.querySelector('script')?.dispatchEvent(new Event('load'))
+    await loading
+  })
+
+  it('preserves encoded pathname segments without decoding them', async () => {
+    const { loadOnlyOfficeApi } = await import('./onlyoffice')
+    const loading = loadOnlyOfficeApi('https://office.example.test/proxy/%2Ftenant///')
+
+    expect(document.querySelector('script')?.src).toBe(
+      'https://office.example.test/proxy/%2Ftenant/web-apps/apps/api/documents/api.js',
+    )
+    window.DocsAPI = { DocEditor: vi.fn() }
+    document.querySelector('script')?.dispatchEvent(new Event('load'))
+    await loading
   })
 
   it.each([
@@ -49,6 +73,19 @@ describe('loadOnlyOfficeApi', () => {
 
     await expect(loadOnlyOfficeApi('https://office-two.example.test')).rejects.toThrow(
       'already belongs to https://office-one.example.test',
+    )
+    expect(document.querySelectorAll('script')).toHaveLength(1)
+
+    document.querySelector('script')?.dispatchEvent(new Event('error'))
+    await expect(first).rejects.toThrow('Failed to load ONLYOFFICE Docs API')
+  })
+
+  it('rejects a different proxy base path on the same origin', async () => {
+    const { loadOnlyOfficeApi } = await import('./onlyoffice')
+    const first = loadOnlyOfficeApi('https://office.example.test/onlyoffice-a')
+
+    await expect(loadOnlyOfficeApi('https://office.example.test/onlyoffice-b')).rejects.toThrow(
+      'already belongs to https://office.example.test/onlyoffice-a',
     )
     expect(document.querySelectorAll('script')).toHaveLength(1)
 

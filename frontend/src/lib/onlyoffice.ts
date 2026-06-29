@@ -18,12 +18,12 @@ declare global {
 const API_PATH = '/web-apps/apps/api/documents/api.js'
 const API_READY_TIMEOUT_MS = 10_000
 const API_READY_POLL_MS = 25
-const SCRIPT_ORIGIN_DATA_KEY = 'slideforgeOnlyofficeOrigin'
+const SCRIPT_BASE_URL_DATA_KEY = 'slideforgeOnlyofficeBaseUrl'
 
 const apiPromises = new Map<string, Promise<OnlyOfficeDocsApi>>()
-let ownedOrigin: string | null = null
+let ownedBaseUrl: string | null = null
 
-function canonicalOrigin(baseUrl: string): string {
+function canonicalBaseUrl(baseUrl: string): string {
   let parsed: URL
   try {
     parsed = new URL(baseUrl.trim())
@@ -39,41 +39,41 @@ function canonicalOrigin(baseUrl: string): string {
   ) {
     throw new Error('Invalid ONLYOFFICE document server URL')
   }
-  // The Docs API is server-wide, so configured paths are intentionally ignored.
-  return parsed.origin
+  const pathname = parsed.pathname.replace(/\/+$/, '')
+  return `${parsed.origin}${pathname}`
 }
 
-function originConflict(origin: string): Error {
-  return new Error(`ONLYOFFICE Docs API already belongs to ${ownedOrigin}; cannot load ${origin}`)
+function baseUrlConflict(baseUrl: string): Error {
+  return new Error(`ONLYOFFICE Docs API already belongs to ${ownedBaseUrl}; cannot load ${baseUrl}`)
 }
 
 export function loadOnlyOfficeApi(baseUrl: string): Promise<OnlyOfficeDocsApi> {
-  let origin: string
+  let normalizedBaseUrl: string
   try {
-    origin = canonicalOrigin(baseUrl)
+    normalizedBaseUrl = canonicalBaseUrl(baseUrl)
   } catch (error) {
     return Promise.reject(error)
   }
 
-  if (ownedOrigin !== null && ownedOrigin !== origin) {
-    return Promise.reject(originConflict(origin))
+  if (ownedBaseUrl !== null && ownedBaseUrl !== normalizedBaseUrl) {
+    return Promise.reject(baseUrlConflict(normalizedBaseUrl))
   }
 
-  const cached = apiPromises.get(origin)
+  const cached = apiPromises.get(normalizedBaseUrl)
   if (cached) return cached
-  ownedOrigin = origin
+  ownedBaseUrl = normalizedBaseUrl
 
   if (window.DocsAPI?.DocEditor) {
     const loaded = Promise.resolve(window.DocsAPI)
-    apiPromises.set(origin, loaded)
+    apiPromises.set(normalizedBaseUrl, loaded)
     return loaded
   }
 
-  const scriptUrl = `${origin}${API_PATH}`
+  const scriptUrl = `${normalizedBaseUrl}${API_PATH}`
   const matchingScript = Array.from(document.scripts).find(
     (candidate) => candidate.src === scriptUrl,
   )
-  const ownedScript = matchingScript?.dataset[SCRIPT_ORIGIN_DATA_KEY] === origin
+  const ownedScript = matchingScript?.dataset[SCRIPT_BASE_URL_DATA_KEY] === normalizedBaseUrl
     ? matchingScript
     : undefined
   if (matchingScript && !ownedScript) matchingScript.remove()
@@ -82,7 +82,7 @@ export function loadOnlyOfficeApi(baseUrl: string): Promise<OnlyOfficeDocsApi> {
   if (!ownedScript) {
     script.src = scriptUrl
     script.async = true
-    script.dataset[SCRIPT_ORIGIN_DATA_KEY] = origin
+    script.dataset[SCRIPT_BASE_URL_DATA_KEY] = normalizedBaseUrl
   }
 
   const loading = new Promise<OnlyOfficeDocsApi>((resolve, reject) => {
@@ -98,8 +98,8 @@ export function loadOnlyOfficeApi(baseUrl: string): Promise<OnlyOfficeDocsApi> {
       if (settled) return
       settled = true
       cleanup()
-      apiPromises.delete(origin)
-      if (ownedOrigin === origin) ownedOrigin = null
+      apiPromises.delete(normalizedBaseUrl)
+      if (ownedBaseUrl === normalizedBaseUrl) ownedBaseUrl = null
       script.remove()
       reject(error)
     }
@@ -122,7 +122,7 @@ export function loadOnlyOfficeApi(baseUrl: string): Promise<OnlyOfficeDocsApi> {
     )
     checkReady()
   })
-  apiPromises.set(origin, loading)
+  apiPromises.set(normalizedBaseUrl, loading)
 
   if (!ownedScript) document.head.append(script)
   return loading
