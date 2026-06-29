@@ -7,6 +7,7 @@ import type {
   SaveDeckRequest, SaveDeckResponse,
   UpdateDeckRequest, UpdateDeckResponse,
   SlidePreviewResponse,
+  OnlyOfficeEditorConfig, DeckStatus, DeckVersion,
 } from '@/types'
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
@@ -37,6 +38,18 @@ async function getRequest<T>(path: string, params?: Record<string, string>): Pro
     }
   }
   const res = await fetch(url.toString())
+  if (!res.ok) {
+    throw await parseError(res)
+  }
+  return res.json()
+}
+
+async function patchRequest<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   if (!res.ok) {
     throw await parseError(res)
   }
@@ -103,4 +116,28 @@ export async function deleteDeck(deckId: string): Promise<{ ok: boolean }> {
 
 export function exportDeckById(deckId: string): Promise<ExportResponse> {
   return request('/export', { deck_id: deckId })
+}
+
+export function getEditorConfig(deckId: string): Promise<OnlyOfficeEditorConfig> {
+  return getRequest(`/decks/${deckId}/editor-config`)
+}
+
+export function getDeckStatus(deckId: string): Promise<DeckStatus> {
+  return getRequest(`/decks/${deckId}/status`)
+}
+
+export function listDeckVersions(deckId: string): Promise<{ versions: DeckVersion[] }> {
+  return getRequest(`/decks/${deckId}/versions`)
+}
+
+export function restoreDeckVersion(deckId: string, versionId: string): Promise<DeckStatus> {
+  return request(`/decks/${deckId}/versions/${versionId}/restore`, {})
+}
+
+export function renameDeck(deckId: string, name: string): Promise<DeckDetail> {
+  return patchRequest(`/decks/${deckId}`, { name })
+}
+
+export function deckDownloadUrl(deckId: string): string {
+  return `${BASE_URL}/decks/${deckId}/download`
 }

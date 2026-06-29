@@ -54,6 +54,8 @@ describe('CreatePage', () => {
     vi.mocked(uploadFile).mockResolvedValue({ file_id: 'file-1.csv', filename: 'data.csv', row_count: 2, columns: ['quarter'], preview: 'quarter\nQ1' })
     vi.mocked(generate).mockResolvedValue({
       session_id: 'session-1',
+      deck_id: 'deck-1',
+      editor_path: '/editor/deck-1',
       slides: [{ index: 1, title: 'Title', bullets: [], notes: '', layout: 'title', chart_data: null }],
     })
     vi.mocked(saveDeck).mockResolvedValue({ id: 'deck-1', name: 'Title', created_at: '2026-06-26T00:00:00Z' })
@@ -78,6 +80,8 @@ describe('CreatePage', () => {
   it('sends script source_type and selected audience', async () => {
     vi.mocked(generate).mockResolvedValue({
       session_id: 'session-2',
+      deck_id: 'deck-2',
+      editor_path: '/editor/deck-2',
       slides: [{ index: 1, title: 'Title', bullets: [], notes: '', layout: 'title', chart_data: null }],
     })
     renderCreatePage()

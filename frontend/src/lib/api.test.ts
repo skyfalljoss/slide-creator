@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { exportDeck, generate, getDeckSlidePreview, refine, uploadFile } from './api'
+import {
+  deckDownloadUrl,
+  exportDeck,
+  generate,
+  getDeckSlidePreview,
+  getDeckStatus,
+  getEditorConfig,
+  listDeckVersions,
+  refine,
+  renameDeck,
+  restoreDeckVersion,
+  uploadFile,
+} from './api'
 
 describe('api client', () => {
   const fetchMock = vi.fn()
@@ -67,5 +79,40 @@ describe('api client', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/v1/decks/deck-1/preview?slide_index=2')
     expect(result.image_b64).toBe('UE5H')
     expect(result.width).toBe(1920)
+  })
+
+  it('uses the persisted deck editor, status, and version routes', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) })
+
+    await getEditorConfig('deck-1')
+    await getDeckStatus('deck-1')
+    await listDeckVersions('deck-1')
+    await restoreDeckVersion('deck-1', 'version-2')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'http://localhost:8000/api/v1/decks/deck-1/editor-config')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://localhost:8000/api/v1/decks/deck-1/status')
+    expect(fetchMock).toHaveBeenNthCalledWith(3, 'http://localhost:8000/api/v1/decks/deck-1/versions')
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      'http://localhost:8000/api/v1/decks/deck-1/versions/version-2/restore',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    )
+  })
+
+  it('renames decks with PATCH and exposes the direct download URL', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'deck-1', name: 'Renamed' }) })
+
+    await renameDeck('deck-1', 'Renamed')
+
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/v1/decks/deck-1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed' }),
+    })
+    expect(deckDownloadUrl('deck-1')).toBe('http://localhost:8000/api/v1/decks/deck-1/download')
   })
 })

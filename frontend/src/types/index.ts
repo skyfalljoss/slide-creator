@@ -86,7 +86,30 @@ export interface GenerateRequest {
 
 export interface GenerateResponse {
   session_id: string
+  deck_id: string
+  editor_path: string
   slides: SlideData[]
+}
+
+export interface OnlyOfficeEditorConfig {
+  document_server_url: string
+  config: Record<string, unknown>
+}
+
+export interface DeckVersion {
+  id: string
+  version_number: number
+  source: 'generated' | 'onlyoffice_save' | 'restore'
+  created_by: string
+  created_at: string
+  size_bytes: number
+  sha256: string
+}
+
+export interface DeckStatus {
+  current_version_id: string
+  current_version_number: number
+  updated_at: string
 }
 
 export interface UploadResponse {
