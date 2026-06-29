@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -86,10 +86,12 @@ export function CreatePage() {
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
   const [file, setFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [generationInFlight, setGenerationInFlight] = useState(false)
+  const generationInFlightRef = useRef(false)
 
   const uploadMutation = useMutation({ mutationFn: uploadFile })
   const generateMutation = useMutation({ mutationFn: generate })
-  const working = uploadMutation.isPending || generateMutation.isPending
+  const working = generationInFlight || uploadMutation.isPending || generateMutation.isPending
 
   const isScript = sourceType === 'script'
   const maxChars = isScript ? SCRIPT_MAX : BRIEF_MAX
@@ -99,7 +101,9 @@ export function CreatePage() {
     : 'e.g., A pitch for a $500M syndicated loan facility for Acme Corp...'
 
   const handleGenerate = async () => {
-    if (!prompt.trim()) return
+    if (!prompt.trim() || generationInFlightRef.current) return
+    generationInFlightRef.current = true
+    setGenerationInFlight(true)
     setError(null)
     try {
       const uploadedFile = file ? await uploadMutation.mutateAsync(file) : null
@@ -122,6 +126,9 @@ export function CreatePage() {
       navigate(result.editor_path)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate deck')
+    } finally {
+      generationInFlightRef.current = false
+      setGenerationInFlight(false)
     }
   }
 
