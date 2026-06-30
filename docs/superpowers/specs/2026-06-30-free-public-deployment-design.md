@@ -13,7 +13,7 @@ architecture.
 ## Target Environment
 
 The deployment uses one Oracle Cloud Infrastructure Always Free Ampere A1 VM
-running Ubuntu. Allocate 4 ARM OCPUs and 24 GB RAM when free-tier capacity is
+running Ubuntu. Allocate 2 ARM OCPUs and 12 GB RAM when free-tier capacity is
 available. The VM runs the repository's existing Docker Compose stack. The
 pinned PostgreSQL, Nginx, Python, Node, and ONLYOFFICE 9.4.0.1 images all provide
 ARM64 builds.
@@ -24,12 +24,15 @@ free tier does not provide a production availability guarantee.
 
 ## Public Network and TLS
 
-A free DuckDNS hostname points to the VM's reserved public IP. Oracle's network
+A free DuckDNS hostname points to the VM's public IP and a systemd timer keeps
+the DNS record current. Oracle's network
 security list and the Ubuntu firewall allow inbound TCP 22, 80, and 443 only.
 SSH uses public-key authentication.
 
-Caddy runs on the host and obtains and renews a public TLS certificate. The
-Compose `web` service binds to `127.0.0.1:8080`, so application traffic cannot
+Caddy runs on the host and obtains and renews a public TLS certificate. Because
+the application has no enabled production identity provider in the free
+configuration, Caddy also requires HTTP Basic Authentication for every public
+request. The Compose `web` service binds to `127.0.0.1:8080`, so application traffic cannot
 bypass Caddy. Caddy redirects HTTP to HTTPS and proxies HTTPS requests to the
 local Nginx container. Nginx continues to route `/api/` to FastAPI and
 `/onlyoffice/` to ONLYOFFICE.
@@ -105,6 +108,8 @@ the older application revision cannot read the upgraded schema.
 The deployment is accepted only when all of these checks succeed:
 
 - Caddy serves the DuckDNS hostname over trusted HTTPS and redirects HTTP.
+- Unauthenticated public requests receive HTTP 401, while the configured
+  Caddy username and password permit access.
 - `/healthz` and `/api/v1/health` return successful responses.
 - All four Compose services report healthy or running as appropriate.
 - A user can generate a deck, open it in ONLYOFFICE, save a change, and export
