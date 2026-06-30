@@ -102,6 +102,34 @@ async def test_create_with_initial_version_sets_current_version_atomically(repos
     assert await repo.get("deck-1", "owner-1") == deck
 
 
+async def test_import_initial_version_preserves_timestamps_and_global_id_visibility(repository):
+    repo, _database = repository
+    created = datetime(2020, 1, 2, 3, 4, tzinfo=timezone.utc)
+    updated = datetime(2021, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    deck = await repo.import_with_initial_version(
+        deck_id="legacy-id",
+        version_id="legacy-version",
+        owner_id="migration-owner",
+        name="Legacy",
+        deck_type="sales",
+        theme="dark",
+        aspect_ratio="4:3",
+        generation_payload={"slides": []},
+        storage_key="decks/legacy-id/versions/legacy-version.pptx",
+        sha256="b" * 64,
+        size_bytes=321,
+        created_at=created,
+        updated_at=updated,
+    )
+
+    assert deck.created_at == created
+    assert deck.updated_at == updated
+    assert deck.current_version.created_at == created
+    assert await repo.contains_deck_id("legacy-id") is True
+    assert await repo.get("legacy-id", "someone-else") is None
+
+
 async def test_owner_scopes_user_facing_queries_and_mutations(repository):
     repo, _database = repository
     await create_deck(repo)

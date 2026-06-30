@@ -1,6 +1,8 @@
 import asyncio
 import os
 import threading
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Protocol
 
@@ -28,9 +30,16 @@ class DeckFileStorage(Protocol):
     async def delete(self, key: str) -> None: ...
     async def exists(self, key: str) -> bool: ...
     async def list_keys(self, prefix: str) -> list[str]: ...
+    async def list_objects(self, prefix: str) -> list["DeckFileObject"]: ...
     async def open_stream(
         self, key: str, chunk_size: int = DECK_STREAM_CHUNK_SIZE
     ) -> DeckFileStream: ...
+
+
+@dataclass(frozen=True)
+class DeckFileObject:
+    key: str
+    updated_at: datetime | None
 
 
 class _ThreadedDeckFileStream:
@@ -230,13 +239,16 @@ class LocalDeckFileStorage:
         return await asyncio.to_thread(is_file)
 
     async def list_keys(self, prefix: str) -> list[str]:
+        return [item.key for item in await self.list_objects(prefix)]
+
+    async def list_objects(self, prefix: str) -> list[DeckFileObject]:
         normalized_prefix = _normalize_prefix(prefix)
 
-        def list_files() -> list[str]:
+        def list_files() -> list[DeckFileObject]:
             root = self._trusted_root()
             if not root.exists():
                 return []
-            keys: list[str] = []
+            objects: list[DeckFileObject] = []
             for directory, directory_names, file_names in os.walk(root, followlinks=False):
                 directory_path = Path(directory)
                 directory_names[:] = [
@@ -251,8 +263,14 @@ class LocalDeckFileStorage:
                     except (FileNotFoundError, ValueError):
                         continue
                     if relative.startswith(normalized_prefix):
-                        keys.append(relative)
-            return sorted(keys)
+                        try:
+                            modified = datetime.fromtimestamp(
+                                path.stat().st_mtime, tz=timezone.utc
+                            )
+                        except OSError:
+                            modified = None
+                        objects.append(DeckFileObject(relative, modified))
+            return sorted(objects, key=lambda item: item.key)
 
         return await asyncio.to_thread(list_files)
 
@@ -319,10 +337,16 @@ class GCSDeckFileStorage:
         return await asyncio.to_thread(blob.exists)
 
     async def list_keys(self, prefix: str) -> list[str]:
+        return [item.key for item in await self.list_objects(prefix)]
+
+    async def list_objects(self, prefix: str) -> list[DeckFileObject]:
         normalized = _normalize_prefix(prefix)
 
-        def list_blob_names() -> list[str]:
+        def list_blob_names() -> list[DeckFileObject]:
             blobs = self._bucket().list_blobs(prefix=normalized)
-            return sorted(blob.name for blob in blobs)
+            return sorted(
+                (DeckFileObject(blob.name, getattr(blob, "updated", None)) for blob in blobs),
+                key=lambda item: item.key,
+            )
 
         return await asyncio.to_thread(list_blob_names)

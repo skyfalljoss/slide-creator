@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -23,6 +24,19 @@ async def test_local_storage_round_trip_and_missing_delete(tmp_path: Path):
     await storage.delete(key)
     await storage.delete(key)
     assert await storage.exists(key) is False
+
+
+@pytest.mark.asyncio
+async def test_local_storage_lists_object_modified_time(tmp_path: Path):
+    storage = LocalDeckFileStorage(tmp_path)
+    key = "decks/d1/versions/v1.pptx"
+    await storage.put(key, b"first")
+
+    objects = await storage.list_objects("decks/")
+
+    assert [item.key for item in objects] == [key]
+    assert isinstance(objects[0].updated_at, datetime)
+    assert objects[0].updated_at.tzinfo == timezone.utc
 
 
 @pytest.mark.asyncio

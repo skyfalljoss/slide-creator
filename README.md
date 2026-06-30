@@ -346,3 +346,40 @@ docker compose --env-file .env exec -T postgres \
 
 If a drill fails, retain the command output, correct the backup or permission
 problem, and repeat the drill before treating backups as recoverable.
+
+### Legacy deck migration and orphan cleanup
+
+Back up both databases and deck object storage before migration. The importer
+reads the legacy SQLite database without modifying it, preserves deck IDs and
+timestamps, renders an authoritative version-1 PPTX, and skips IDs already in
+the versioned database. It continues after individual bad rows but exits
+nonzero when any row fails:
+
+```bash
+cd backend
+uv run python scripts/migrate_sqlite_decks.py \
+  --sqlite-path .data/decks.db \
+  --owner-id local-user
+```
+
+Inspect orphan candidates before deletion. Cleanup compares storage against
+all version rows across owners and protects files modified within the last 24
+hours. Dry-run is the default; deletion requires the explicit `--apply` flag:
+
+```bash
+cd backend
+uv run python scripts/cleanup_orphan_deck_files.py --dry-run
+uv run python scripts/cleanup_orphan_deck_files.py --apply
+```
+
+Run the opt-in persistence and editor save-flow checks against disposable
+integration infrastructure. They are strictly skipped when their environment
+variables are absent:
+
+```bash
+cd backend
+TEST_DATABASE_URL=postgresql+asyncpg://slideforge:slideforge@localhost:5432/slideforge \
+  uv run pytest -m postgres -v
+ONLYOFFICE_SMOKE_URL=http://localhost:8080 \
+  uv run pytest -m onlyoffice -v
+```

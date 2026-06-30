@@ -242,6 +242,76 @@ class DeckRepository:
                 record = _deck_record(deck, version)
         return record
 
+    async def import_with_initial_version(
+        self,
+        *,
+        deck_id: str,
+        version_id: str,
+        owner_id: str,
+        name: str,
+        deck_type: str,
+        theme: str,
+        aspect_ratio: str,
+        generation_payload: dict | None,
+        storage_key: str,
+        sha256: str,
+        size_bytes: int,
+        created_at: datetime,
+        updated_at: datetime,
+    ) -> DeckRecord:
+        """Import one legacy deck without rewriting its authoritative timestamps."""
+        created_at = _utc(created_at)
+        updated_at = _utc(updated_at)
+        deck = DeckRow(
+            id=deck_id,
+            owner_id=owner_id,
+            name=name,
+            deck_type=deck_type,
+            theme=theme,
+            aspect_ratio=aspect_ratio,
+            generation_payload=generation_payload,
+            current_version_id=None,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        version = DeckVersionRow(
+            id=version_id,
+            deck_id=deck_id,
+            version_number=1,
+            storage_key=storage_key,
+            sha256=sha256,
+            size_bytes=size_bytes,
+            source="migration",
+            created_by=owner_id,
+            created_at=created_at,
+        )
+        async with self._database.session() as session:
+            async with _classified_write(session):
+                session.add(deck)
+                await session.flush()
+                session.add(version)
+                await session.flush()
+                deck.current_version_id = version_id
+                # The ORM column has an automatic on-update value. Explicitly
+                # retain the legacy timestamp while setting the current pointer.
+                deck.updated_at = updated_at
+                await session.flush()
+                await session.execute(
+                    update(DeckRow)
+                    .where(DeckRow.id == deck_id)
+                    .values(updated_at=updated_at)
+                )
+                await session.refresh(deck)
+                record = _deck_record(deck, version)
+        return record
+
+    async def contains_deck_id(self, deck_id: str) -> bool:
+        """Check a global primary key without exposing deck data across owners."""
+        async with self._database.session() as session:
+            return await session.scalar(
+                select(DeckRow.id).where(DeckRow.id == deck_id)
+            ) is not None
+
     async def get(self, deck_id: str, owner_id: str) -> DeckRecord | None:
         async with self._database.session() as session:
             deck = await session.scalar(

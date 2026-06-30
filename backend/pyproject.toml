@@ -29,6 +29,10 @@ dependencies = [
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+markers = [
+    "onlyoffice: requires a running ONLYOFFICE Document Server",
+    "postgres: requires a running PostgreSQL integration database",
+]
 
 [dependency-groups]
 dev = [
