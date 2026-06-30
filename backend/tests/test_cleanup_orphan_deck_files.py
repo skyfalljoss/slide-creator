@@ -14,6 +14,9 @@ class FakeRepository:
             raise self.error
         return self.keys
 
+    async def storage_key_referenced(self, key):
+        return key in self.keys
+
 
 class FakeStorage:
     def __init__(self, objects=None, *, list_error=None, delete_error=None):
@@ -34,7 +37,7 @@ class FakeStorage:
         self.deleted.append(key)
 
 
-async def test_cleanup_defaults_to_dry_run_and_uses_inclusive_grace_boundary():
+async def test_cleanup_defaults_to_dry_run_and_retains_exact_grace_boundary():
     now = datetime(2026, 1, 2, tzinfo=timezone.utc)
     storage = FakeStorage(
         [
@@ -48,7 +51,7 @@ async def test_cleanup_defaults_to_dry_run_and_uses_inclusive_grace_boundary():
 
     result = await cleanup_orphan_deck_files(repository, storage, now=now)
 
-    assert (result.examined, result.retained, result.candidates, result.deleted) == (4, 3, 1, 0)
+    assert (result.examined, result.retained, result.candidates, result.deleted) == (4, 4, 0, 0)
     assert result.failed == 0
     assert storage.deleted == []
 
@@ -69,6 +72,42 @@ async def test_cleanup_apply_deletes_candidates_and_reports_each_failure():
 
     assert (result.candidates, result.deleted, result.failed) == (2, 1, 1)
     assert storage.deleted == ["decks/d/a.pptx"]
+
+
+async def test_cleanup_rechecks_candidate_that_becomes_referenced_before_delete():
+    now = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    key = "decks/d/newly-referenced.pptx"
+    storage = FakeStorage([DeckFileObject(key, now - timedelta(days=2))])
+
+    class RacingRepository(FakeRepository):
+        async def storage_key_referenced(self, candidate):
+            self.keys.add(candidate)
+            return True
+
+    result = await cleanup_orphan_deck_files(
+        RacingRepository(), storage, apply=True, now=now
+    )
+
+    assert result.deleted == 0
+    assert result.retained == 1
+    assert storage.deleted == []
+
+
+async def test_cleanup_recheck_failure_is_fail_closed():
+    now = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    key = "decks/d/uncertain.pptx"
+    storage = FakeStorage([DeckFileObject(key, now - timedelta(days=2))])
+
+    class UnavailableRepository(FakeRepository):
+        async def storage_key_referenced(self, candidate):
+            raise OSError("database unavailable")
+
+    result = await cleanup_orphan_deck_files(
+        UnavailableRepository(), storage, apply=True, now=now
+    )
+
+    assert result.failed == 1 and result.retained == 1
+    assert storage.deleted == []
 
 
 async def test_cleanup_never_deletes_when_listing_or_repository_is_uncertain():

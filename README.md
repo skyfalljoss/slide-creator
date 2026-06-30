@@ -362,6 +362,10 @@ uv run python scripts/migrate_sqlite_decks.py \
   --owner-id local-user
 ```
 
+The importer has conservative file, row-JSON, nesting, and slide-count limits.
+Use `--help` to inspect the override flags before increasing a limit for a
+trusted legacy database.
+
 Inspect orphan candidates before deletion. Cleanup compares storage against
 all version rows across owners and protects files modified within the last 24
 hours. Dry-run is the default; deletion requires the explicit `--apply` flag:
@@ -381,5 +385,11 @@ cd backend
 TEST_DATABASE_URL=postgresql+asyncpg://slideforge:slideforge@localhost:5432/slideforge \
   uv run pytest -m postgres -v
 ONLYOFFICE_SMOKE_URL=http://localhost:8080 \
+ONLYOFFICE_SMOKE_JWT_SECRET="$ONLYOFFICE_JWT_SECRET" \
+ONLYOFFICE_SMOKE_FIXTURE_HOST=host.docker.internal \
   uv run pytest -m onlyoffice -v
 ```
+
+`ONLYOFFICE_SMOKE_FIXTURE_HOST` must resolve from the Document Server to the
+machine running pytest. The smoke test uses the signed conversion service, so
+it fails if ONLYOFFICE cannot fetch or process the fixture PPTX.

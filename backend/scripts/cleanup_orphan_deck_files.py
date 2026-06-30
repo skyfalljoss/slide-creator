@@ -19,6 +19,7 @@ from app.services.platform.deck_repository import DeckRepository
 
 class StorageKeyRepository(Protocol):
     async def all_storage_keys(self) -> set[str]: ...
+    async def storage_key_referenced(self, storage_key: str) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -71,11 +72,24 @@ async def cleanup_orphan_deck_files(
                 failed += 1
                 failures.append(f"invalid modified time: {item.key}")
                 continue
-            if modified.astimezone(timezone.utc) > cutoff:
+            if modified.astimezone(timezone.utc) >= cutoff:
                 retained += 1
                 continue
             candidates += 1
             if apply:
+                try:
+                    if await repository.storage_key_referenced(item.key):
+                        retained += 1
+                        candidates -= 1
+                        continue
+                except Exception as exc:
+                    retained += 1
+                    candidates -= 1
+                    failed += 1
+                    failures.append(
+                        f"reference recheck failed ({type(exc).__name__}): {item.key}"
+                    )
+                    continue
                 try:
                     await storage.delete(item.key)
                     deleted += 1

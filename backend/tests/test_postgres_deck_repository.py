@@ -32,17 +32,18 @@ async def test_postgres_concurrent_versions_and_callback_idempotency(tmp_path):
         pytest.fail("TEST_DATABASE_URL must use postgresql+asyncpg")
     first_database = Database(url)
     second_database = Database(url)
-    await first_database.create_schema()
     first = DeckRepository(first_database)
     second = DeckRepository(second_database)
     deck_id = str(uuid4())
     initial_id = str(uuid4())
     prefix = f"decks/{deck_id}/versions/"
     storage = LocalDeckFileStorage(tmp_path / "files")
-    initial = _pptx_bytes()
-    initial_key = f"{prefix}{initial_id}.pptx"
-    await storage.put(initial_key, initial)
+    created = False
     try:
+        await first_database.create_schema()
+        initial = _pptx_bytes()
+        initial_key = f"{prefix}{initial_id}.pptx"
+        await storage.put(initial_key, initial)
         await first.create_with_initial_version(
             deck_id=deck_id,
             version_id=initial_id,
@@ -56,6 +57,7 @@ async def test_postgres_concurrent_versions_and_callback_idempotency(tmp_path):
             sha256=hashlib.sha256(initial).hexdigest(),
             size_bytes=len(initial),
         )
+        created = True
         ids = [str(uuid4()), str(uuid4())]
         concurrent_contents = [_pptx_bytes(2), _pptx_bytes(3)]
         concurrent_keys = [f"{prefix}{ids[0]}.pptx", f"{prefix}{ids[1]}.pptx"]
@@ -84,7 +86,9 @@ async def test_postgres_concurrent_versions_and_callback_idempotency(tmp_path):
             ),
         )
         assert {record.version_number for record in records} == {2, 3}
-        assert (await first.get(deck_id, "postgres-test-owner")).current_version_id in ids
+        current = await first.get(deck_id, "postgres-test-owner")
+        assert current.current_version_id in ids
+        assert await storage.exists(current.current_version.storage_key)
 
         edited = _pptx_bytes(2)
         service_one = DeckVersionService(first, storage, None, len(edited) + 100, 10)
@@ -114,8 +118,13 @@ async def test_postgres_concurrent_versions_and_callback_idempotency(tmp_path):
             for version in await first.list_versions(deck_id, "postgres-test-owner")
         ) == 1
     finally:
-        keys = await first.delete(deck_id, "postgres-test-owner")
-        for key in keys:
-            await storage.delete(key)
-        await first_database.dispose()
-        await second_database.dispose()
+        try:
+            if created:
+                keys = await first.delete(deck_id, "postgres-test-owner")
+                for key in keys:
+                    await storage.delete(key)
+        finally:
+            try:
+                await first_database.dispose()
+            finally:
+                await second_database.dispose()

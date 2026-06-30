@@ -312,6 +312,22 @@ class DeckRepository:
                 select(DeckRow.id).where(DeckRow.id == deck_id)
             ) is not None
 
+    async def get_global(self, deck_id: str) -> DeckRecord | None:
+        """Internal migration lookup that is deliberately not used by API routes."""
+        async with self._database.session() as session:
+            deck = await session.get(DeckRow, deck_id)
+            if deck is None:
+                return None
+            version = None
+            if deck.current_version_id is not None:
+                version = await session.scalar(
+                    select(DeckVersionRow).where(
+                        DeckVersionRow.id == deck.current_version_id,
+                        DeckVersionRow.deck_id == deck.id,
+                    )
+                )
+            return _deck_record(deck, version)
+
     async def get(self, deck_id: str, owner_id: str) -> DeckRecord | None:
         async with self._database.session() as session:
             deck = await session.scalar(
@@ -566,3 +582,12 @@ class DeckRepository:
     async def all_storage_keys(self) -> set[str]:
         async with self._database.session() as session:
             return set(await session.scalars(select(DeckVersionRow.storage_key)))
+
+    async def storage_key_referenced(self, storage_key: str) -> bool:
+        """Recheck one cleanup candidate in a fresh transaction snapshot."""
+        async with self._database.session() as session:
+            return await session.scalar(
+                select(DeckVersionRow.id).where(
+                    DeckVersionRow.storage_key == storage_key
+                )
+            ) is not None
