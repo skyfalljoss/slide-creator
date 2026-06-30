@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlsplit
 
 import jwt
 import pytest
@@ -82,6 +83,54 @@ def test_editor_config_is_signed_for_current_version(service: OnlyOfficeService)
     assert signed_config["editorConfig"]["callbackUrl"].startswith(
         "http://api:8000/api/v1/decks/deck-1/callback?token="
     )
+
+
+def test_editor_config_uses_separate_content_and_callback_lifetimes():
+    current_time = NOW
+    service = OnlyOfficeService(
+        public_url="http://localhost:8080",
+        api_base_url="http://api:8000",
+        jwt_secret=SECRET,
+        file_token_ttl_seconds=300,
+        callback_token_ttl_seconds=604_800,
+        now=lambda: current_time,
+    )
+    result = service.build_editor_config(
+        deck=_deck(), user_id="alice", user_name="Alice"
+    )
+    content_token = parse_qs(urlsplit(result.config["document"]["url"]).query)[
+        "token"
+    ][0]
+    callback_token = parse_qs(
+        urlsplit(result.config["editorConfig"]["callbackUrl"]).query
+    )["token"][0]
+
+    current_time = NOW + timedelta(minutes=6)
+    with pytest.raises(OnlyOfficeTokenError, match="expired"):
+        service.decode_scoped_token(
+            content_token,
+            purpose="content",
+            deck_id="deck-1",
+            version_id="version-1",
+            subject="alice",
+        )
+    service.decode_scoped_token(
+        callback_token,
+        purpose="callback",
+        deck_id="deck-1",
+        version_id="version-1",
+        subject="alice",
+    )
+
+    current_time = NOW + timedelta(days=7)
+    with pytest.raises(OnlyOfficeTokenError, match="expired"):
+        service.decode_scoped_token(
+            callback_token,
+            purpose="callback",
+            deck_id="deck-1",
+            version_id="version-1",
+            subject="alice",
+        )
 
 
 @pytest.mark.parametrize(
@@ -183,6 +232,7 @@ def test_scoped_token_contains_required_identity_claims(
         algorithms=["HS256"],
         options={"verify_exp": False, "verify_iat": False},
     )
+    expected_ttl = 604_800 if purpose == "callback" else 300
 
     assert claims == {
         "sub": "alice",
@@ -190,7 +240,7 @@ def test_scoped_token_contains_required_identity_claims(
         "version_id": "version-1",
         "purpose": purpose,
         "iat": int(NOW.timestamp()),
-        "exp": int((NOW + timedelta(seconds=300)).timestamp()),
+        "exp": int((NOW + timedelta(seconds=expected_ttl)).timestamp()),
     }
 
 

@@ -13,6 +13,7 @@ def test_database_and_onlyoffice_defaults(monkeypatch):
         "ONLYOFFICE_API_URL",
         "ONLYOFFICE_JWT_SECRET",
         "ONLYOFFICE_FILE_TOKEN_TTL_SECONDS",
+        "ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS",
         "ONLYOFFICE_MAX_FILE_BYTES",
         "LOCAL_DECK_FILE_DIR",
     ):
@@ -25,6 +26,7 @@ def test_database_and_onlyoffice_defaults(monkeypatch):
     assert configured.onlyoffice_internal_url == "http://onlyoffice"
     assert configured.onlyoffice_api_url == "http://host.docker.internal:8000"
     assert configured.onlyoffice_max_file_bytes == 50_000_000
+    assert configured.onlyoffice_callback_token_ttl_seconds == 604_800
     assert configured.local_deck_file_dir == ".data/deck-files"
 
 
@@ -60,6 +62,7 @@ def test_onlyoffice_public_url_preserves_virtual_proxy_path():
         ("deck_version_retention", 101),
         ("onlyoffice_max_file_bytes", 0),
         ("onlyoffice_file_token_ttl_seconds", 0),
+        ("onlyoffice_callback_token_ttl_seconds", 0),
     ],
 )
 def test_deck_version_settings_reject_invalid_values(field, value):

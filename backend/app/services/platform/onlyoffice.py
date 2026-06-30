@@ -95,6 +95,7 @@ class OnlyOfficeService:
         api_base_url: str,
         jwt_secret: str,
         file_token_ttl_seconds: int,
+        callback_token_ttl_seconds: int = 604_800,
         internal_url: str = "http://onlyoffice",
         max_file_bytes: int = 50_000_000,
         enabled: bool = True,
@@ -106,6 +107,8 @@ class OnlyOfficeService:
             raise ValueError("ONLYOFFICE JWT secret must not be empty")
         if file_token_ttl_seconds <= 0:
             raise ValueError("ONLYOFFICE token lifetime must be positive")
+        if callback_token_ttl_seconds <= 0:
+            raise ValueError("ONLYOFFICE callback token lifetime must be positive")
         if max_file_bytes <= 0:
             raise ValueError("ONLYOFFICE maximum file size must be positive")
         if download_deadline_seconds <= 0:
@@ -115,6 +118,7 @@ class OnlyOfficeService:
         self._internal_url = _validated_http_origin(internal_url, "internal URL")
         self._jwt_secret = jwt_secret
         self._file_token_ttl_seconds = file_token_ttl_seconds
+        self._callback_token_ttl_seconds = callback_token_ttl_seconds
         self._max_file_bytes = max_file_bytes
         self._enabled = enabled
         self._download_client = download_client
@@ -249,6 +253,11 @@ class OnlyOfficeService:
         if not subject or not deck_id or not version_id:
             raise ValueError("ONLYOFFICE token identity must not be empty")
         issued_at = self._utc_now()
+        token_ttl_seconds = (
+            self._callback_token_ttl_seconds
+            if purpose == "callback"
+            else self._file_token_ttl_seconds
+        )
         payload = {
             "sub": subject,
             "deck_id": deck_id,
@@ -256,7 +265,7 @@ class OnlyOfficeService:
             "purpose": purpose,
             "iat": int(issued_at.timestamp()),
             "exp": int(
-                (issued_at + timedelta(seconds=self._file_token_ttl_seconds)).timestamp()
+                (issued_at + timedelta(seconds=token_ttl_seconds)).timestamp()
             ),
         }
         return jwt.encode(payload, self._jwt_secret, algorithm=_TOKEN_ALGORITHM)

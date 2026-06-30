@@ -3,6 +3,18 @@ set -Eeuo pipefail
 
 umask 077
 
+if [[ -z "${STORAGE_PROVIDER:-}" ]]; then
+    echo "STORAGE_PROVIDER is required; use 'make backup' to load .env explicitly." >&2
+    exit 1
+fi
+
+if [[ "$STORAGE_PROVIDER" == "local" \
+    && "${ALLOW_INCOMPLETE_LOCAL_BACKUP:-false}" != "true" ]]; then
+    echo "Refusing a PostgreSQL-only backup while STORAGE_PROVIDER=local." >&2
+    echo "Deck PPTX files would be omitted. Use GCS, or explicitly set ALLOW_INCOMPLETE_LOCAL_BACKUP=true." >&2
+    exit 1
+fi
+
 if [[ -z "${BACKUP_GCS_URI:-}" ]]; then
     echo "BACKUP_GCS_URI is required (for example, gs://my-private-bucket/backups)." >&2
     exit 1
@@ -33,7 +45,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker compose --project-directory "$ROOT_DIR" exec -T postgres \
+COMPOSE=(docker compose --project-directory "$ROOT_DIR")
+if [[ -f "$ROOT_DIR/.env" ]]; then
+    COMPOSE+=(--env-file "$ROOT_DIR/.env")
+fi
+
+"${COMPOSE[@]}" exec -T postgres \
     pg_dump --username slideforge --dbname slideforge --no-owner --no-privileges \
     | gzip -9 >"$TEMP_FILE"
 

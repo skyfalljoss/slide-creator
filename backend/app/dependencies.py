@@ -114,6 +114,7 @@ def get_onlyoffice_service() -> OnlyOfficeService:
         internal_url=settings.onlyoffice_internal_url,
         jwt_secret=settings.onlyoffice_jwt_secret,
         file_token_ttl_seconds=settings.onlyoffice_file_token_ttl_seconds,
+        callback_token_ttl_seconds=settings.onlyoffice_callback_token_ttl_seconds,
         max_file_bytes=settings.onlyoffice_max_file_bytes,
         enabled=settings.onlyoffice_enabled,
         download_client=get_http_client(),

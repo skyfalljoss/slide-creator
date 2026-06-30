@@ -47,15 +47,21 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://slideforge:${POSTGRES_PASSWORD}@postgres:5432/slideforge
-      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-gcs}
       LOCAL_DECK_FILE_DIR: /app/.data/deck-files
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
-      GCS_BUCKET: ${GCS_BUCKET:-}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?Set GCP_PROJECT_ID in .env}
+      GCP_REGION: ${GCP_REGION:-us-central1}
+      GCS_BUCKET: ${GCS_BUCKET:?Set GCS_BUCKET in .env}
+      AI_PROVIDER: ${AI_PROVIDER:-local}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      CITI_SSO_ENABLED: ${CITI_SSO_ENABLED:-false}
       ONLYOFFICE_ENABLED: "true"
       ONLYOFFICE_PUBLIC_URL: ${ONLYOFFICE_PUBLIC_URL:-http://localhost/onlyoffice}
       ONLYOFFICE_INTERNAL_URL: http://onlyoffice
       ONLYOFFICE_API_URL: http://backend:8000
       ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
+      ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS: ${ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS:-604800}
       LOG_FORMAT: json
     depends_on:
       postgres:

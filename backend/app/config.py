@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     onlyoffice_api_url: str = "http://host.docker.internal:8000"
     onlyoffice_jwt_secret: str = ""
     onlyoffice_file_token_ttl_seconds: int = Field(default=300, gt=0)
+    onlyoffice_callback_token_ttl_seconds: int = Field(
+        default=604_800, gt=0, le=2_592_000
+    )
     onlyoffice_max_file_bytes: int = Field(
         default=50_000_000, gt=0, le=500_000_000
     )

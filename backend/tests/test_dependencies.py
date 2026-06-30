@@ -9,6 +9,7 @@ from app.dependencies import (
     get_deck_version_service,
     get_generator_service,
     get_dlp_service,
+    get_onlyoffice_service,
     get_storage_service,
     get_session_store,
     get_audit_service,
@@ -131,3 +132,13 @@ def test_get_deck_version_service_is_cached_and_uses_configured_dependencies(mon
         assert service._retention == settings.deck_version_retention
     finally:
         get_deck_version_service.cache_clear()
+
+
+def test_get_onlyoffice_service_uses_callback_token_lifetime(monkeypatch):
+    monkeypatch.setattr(settings, "onlyoffice_callback_token_ttl_seconds", 1234)
+    get_onlyoffice_service.cache_clear()
+    try:
+        service = get_onlyoffice_service()
+        assert service._callback_token_ttl_seconds == 1234
+    finally:
+        get_onlyoffice_service.cache_clear()

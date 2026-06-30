@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend stack-up stack-down stack-logs migrate backup
+.PHONY: dev backend frontend stack-up stack-down stack-logs migrate backup onlyoffice-shutdown
 
 dev:
 	$(MAKE) -j2 backend frontend
@@ -10,16 +10,20 @@ frontend:
 	cd frontend && pnpm dev
 
 stack-up:
-	docker compose up --build -d
+	docker compose --env-file .env up --build -d
 
 stack-down:
-	docker compose down
+	$(MAKE) onlyoffice-shutdown
+	docker compose --env-file .env down
 
 stack-logs:
-	docker compose logs -f backend onlyoffice web
+	docker compose --env-file .env logs -f backend onlyoffice web
 
 migrate:
-	cd backend && uv run alembic upgrade head
+	docker compose --env-file .env run --rm backend uv run alembic upgrade head
 
 backup:
-	./deploy/backup-postgres.sh
+	@set -a; . ./.env; set +a; ./deploy/backup-postgres.sh
+
+onlyoffice-shutdown:
+	./deploy/shutdown-onlyoffice.sh

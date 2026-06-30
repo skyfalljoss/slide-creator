@@ -17,6 +17,18 @@ def test_compose_defines_private_onlyoffice_stack() -> None:
     assert services["onlyoffice"]["healthcheck"]
     assert services["backend"]["depends_on"]["onlyoffice"]["condition"] == "service_healthy"
     assert services["backend"]["environment"]["ONLYOFFICE_API_URL"] == "http://backend:8000"
+    assert services["backend"]["environment"]["STORAGE_PROVIDER"] == "${STORAGE_PROVIDER:-gcs}"
+    assert services["backend"]["environment"]["ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS"] == "${ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS:-604800}"
+    for name in (
+        "AI_PROVIDER",
+        "GEMINI_API_KEY",
+        "GEMINI_MODEL",
+        "GCP_PROJECT_ID",
+        "GCP_REGION",
+        "GCS_BUCKET",
+        "CITI_SSO_ENABLED",
+    ):
+        assert name in services["backend"]["environment"]
 
 
 def test_nginx_proxies_api_and_onlyoffice_virtual_path() -> None:
@@ -28,8 +40,11 @@ def test_nginx_proxies_api_and_onlyoffice_virtual_path() -> None:
     assert "proxy_pass http://onlyoffice/;" in config
     assert "proxy_set_header Upgrade $http_upgrade;" in config
     assert "proxy_set_header Connection $connection_upgrade;" in config
-    assert "proxy_set_header X-Forwarded-Host $http_host/onlyoffice;" in config
+    assert "map $http_x_forwarded_host $forwarded_host" in config
+    assert "proxy_set_header X-Forwarded-Host $forwarded_host/onlyoffice;" in config
     assert "proxy_set_header X-Forwarded-Proto $forwarded_proto;" in config
+    assert "proxy_read_timeout 600s;" in config
+    assert "X-Content-Type-Options" in config
     assert "try_files $uri $uri/ /index.html;" in config
 
 
@@ -56,6 +71,24 @@ def test_backup_script_is_fail_fast_and_does_not_embed_passwords() -> None:
     assert "gcloud storage cp" in script
     assert 'gs://*' in script
     assert "POSTGRES_PASSWORD" not in script
+    assert "STORAGE_PROVIDER is required" in script
+    assert "ALLOW_INCOMPLETE_LOCAL_BACKUP" in script
+
+
+def test_restore_and_onlyoffice_shutdown_scripts_are_defensive() -> None:
+    restore = (ROOT / "deploy" / "restore-postgres.sh").read_text()
+    shutdown = (ROOT / "deploy" / "shutdown-onlyoffice.sh").read_text()
+
+    assert "set -Eeuo pipefail" in restore
+    assert "mktemp" in restore
+    assert "trap cleanup EXIT" in restore
+    assert "gzip -t" in restore
+    assert "gunzip -c" in restore
+    assert "ON_ERROR_STOP=1" in restore
+    assert "RESTORE_CONFIRM_TARGET" in restore
+    assert "slideforge_restore" in restore
+    assert "documentserver-prepare4shutdown.sh" in shutdown
+    assert "300" in shutdown
 
 
 def test_example_environment_and_make_targets_are_documented() -> None:
@@ -71,10 +104,20 @@ def test_example_environment_and_make_targets_are_documented() -> None:
         "GCS_BUCKET",
         "BACKUP_GCS_URI",
         "STORAGE_PROVIDER",
+        "ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS",
     ):
         assert f"{name}=" in env_example
 
-    for target in ("stack-up:", "stack-down:", "stack-logs:", "migrate:"):
+    assert "STORAGE_PROVIDER=gcs" in env_example
+
+    for target in (
+        "stack-up:",
+        "stack-down:",
+        "stack-logs:",
+        "migrate:",
+        "backup:",
+        "onlyoffice-shutdown:",
+    ):
         assert target in makefile
 
     assert "systemd" in readme
