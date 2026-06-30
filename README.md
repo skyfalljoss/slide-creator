@@ -384,7 +384,7 @@ variables are absent:
 cd backend
 TEST_DATABASE_URL=postgresql+asyncpg://slideforge:slideforge@localhost:5432/slideforge \
   uv run pytest -m postgres -v
-ONLYOFFICE_SMOKE_URL=http://localhost:8080 \
+ONLYOFFICE_SMOKE_URL=http://localhost/onlyoffice \
 ONLYOFFICE_SMOKE_JWT_SECRET="$ONLYOFFICE_JWT_SECRET" \
 ONLYOFFICE_SMOKE_FIXTURE_HOST=host.docker.internal \
   uv run pytest -m onlyoffice -v

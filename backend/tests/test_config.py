@@ -16,6 +16,7 @@ def test_database_and_onlyoffice_defaults(monkeypatch):
         "ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS",
         "ONLYOFFICE_MAX_FILE_BYTES",
         "LOCAL_DECK_FILE_DIR",
+        "DECK_LOCK_DIR",
     ):
         monkeypatch.delenv(variable, raising=False)
 
@@ -28,6 +29,7 @@ def test_database_and_onlyoffice_defaults(monkeypatch):
     assert configured.onlyoffice_max_file_bytes == 50_000_000
     assert configured.onlyoffice_callback_token_ttl_seconds == 604_800
     assert configured.local_deck_file_dir == ".data/deck-files"
+    assert configured.deck_lock_dir == ".data/deck-locks"
 
 
 def test_onlyoffice_requires_jwt_secret_when_enabled(monkeypatch):

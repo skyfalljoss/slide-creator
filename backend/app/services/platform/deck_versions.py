@@ -8,7 +8,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import structlog
 
 from app.models.schemas import SlideData
-from app.services.platform.deck_files import DeckFileStorage
+from app.services.platform.deck_files import DeckFileStorage, await_destructive
 from app.services.platform.deck_repository import (
     DeckRecord,
     DeckRepository,
@@ -80,41 +80,48 @@ class DeckVersionService:
         deck_id = str(uuid4())
         version_id = str(uuid4())
         storage_key = f"decks/{deck_id}/versions/{version_id}.pptx"
-        await self._storage.put(storage_key, content)
+        uploaded = False
         try:
-            return await self._repository.create_with_initial_version(
-                deck_id=deck_id,
-                version_id=version_id,
-                owner_id=owner_id,
-                name=name,
-                deck_type=deck_type,
-                theme=theme,
-                aspect_ratio=aspect_ratio,
-                generation_payload={
-                    "slides": [item.model_dump(mode="json") for item in slides]
-                },
-                storage_key=storage_key,
-                sha256=checksum,
-                size_bytes=len(content),
-            )
-        except asyncio.CancelledError:
-            raise
+            async with self._repository.storage_key_guard(storage_key) as guard_session:
+                await self._storage.put(storage_key, content)
+                uploaded = True
+                try:
+                    return await self._repository.create_with_initial_version(
+                        deck_id=deck_id,
+                        version_id=version_id,
+                        owner_id=owner_id,
+                        name=name,
+                        deck_type=deck_type,
+                        theme=theme,
+                        aspect_ratio=aspect_ratio,
+                        generation_payload={
+                            "slides": [item.model_dump(mode="json") for item in slides]
+                        },
+                        storage_key=storage_key,
+                        sha256=checksum,
+                        size_bytes=len(content),
+                        session=guard_session,
+                    )
+                except (asyncio.CancelledError, DeckWriteRolledBackError):
+                    raise
+                except Exception as repository_error:
+                    return await self._reconcile_initial_exception(
+                        repository_error=repository_error,
+                        deck_id=deck_id,
+                        version_id=version_id,
+                        owner_id=owner_id,
+                        storage_key=storage_key,
+                        checksum=checksum,
+                        session=guard_session,
+                    )
         except DeckWriteRolledBackError:
-            await self._delete_failed_upload(
-                deck_id=deck_id,
-                version_id=version_id,
-                storage_key=storage_key,
-            )
+            if uploaded:
+                await self._delete_failed_upload(
+                    deck_id=deck_id,
+                    version_id=version_id,
+                    storage_key=storage_key,
+                )
             raise
-        except Exception as repository_error:
-            return await self._reconcile_initial_exception(
-                repository_error=repository_error,
-                deck_id=deck_id,
-                version_id=version_id,
-                owner_id=owner_id,
-                storage_key=storage_key,
-                checksum=checksum,
-            )
 
     async def save_edited_version(
         self,
@@ -133,58 +140,70 @@ class DeckVersionService:
         storage_key = f"decks/{deck_id}/versions/{version_id}.pptx"
 
         async with self._coordinate(version_id):
-            existing = await self._repository.version(deck_id, version_id, owner_id)
-            if existing is not None:
-                result = self._matching_version(existing, checksum)
-                await self._enforce_retention(deck_id)
-                return result
-            if await self._repository.get(deck_id, owner_id) is None:
-                raise DeckNotFoundError("Deck not found")
-
+            uploaded = False
             try:
-                await self._storage.put(storage_key, content)
-            except FileExistsError:
-                result = await self._resolve_existing_version(
-                    deck_id=deck_id,
-                    version_id=version_id,
-                    owner_id=owner_id,
-                    checksum=checksum,
-                    base_version_id=base_version_id,
-                    created_by=created_by,
-                    content_size=len(content),
-                    storage_key=storage_key,
-                )
-            else:
-                try:
-                    result = await self._repository.append_version(
-                        deck_id=deck_id,
-                        owner_id=owner_id,
-                        version_id=version_id,
-                        storage_key=storage_key,
-                        sha256=checksum,
-                        size_bytes=len(content),
-                        source="onlyoffice_save",
-                        created_by=created_by,
-                        base_version_id=base_version_id,
+                async with self._repository.storage_key_guard(
+                    storage_key
+                ) as guard_session:
+                    existing = await self._repository.version(
+                        deck_id, version_id, owner_id, session=guard_session
                     )
-                except asyncio.CancelledError:
-                    raise
-                except DeckWriteRolledBackError:
+                    if existing is not None:
+                        result = self._matching_version(existing, checksum)
+                    else:
+                        if await self._repository.get(
+                            deck_id, owner_id, session=guard_session
+                        ) is None:
+                            raise DeckNotFoundError("Deck not found")
+                        try:
+                            await self._storage.put(storage_key, content)
+                            uploaded = True
+                        except FileExistsError:
+                            result = await self._resolve_existing_version(
+                                deck_id=deck_id,
+                                version_id=version_id,
+                                owner_id=owner_id,
+                                checksum=checksum,
+                                base_version_id=base_version_id,
+                                created_by=created_by,
+                                content_size=len(content),
+                                storage_key=storage_key,
+                                session=guard_session,
+                            )
+                        else:
+                            try:
+                                result = await self._repository.append_version(
+                                    deck_id=deck_id,
+                                    owner_id=owner_id,
+                                    version_id=version_id,
+                                    storage_key=storage_key,
+                                    sha256=checksum,
+                                    size_bytes=len(content),
+                                    source="onlyoffice_save",
+                                    created_by=created_by,
+                                    base_version_id=base_version_id,
+                                    session=guard_session,
+                                )
+                            except (asyncio.CancelledError, DeckWriteRolledBackError):
+                                raise
+                            except Exception as repository_error:
+                                result = await self._reconcile_append_exception(
+                                    repository_error=repository_error,
+                                    deck_id=deck_id,
+                                    version_id=version_id,
+                                    owner_id=owner_id,
+                                    storage_key=storage_key,
+                                    checksum=checksum,
+                                    session=guard_session,
+                                )
+            except DeckWriteRolledBackError:
+                if uploaded:
                     await self._delete_failed_upload(
                         deck_id=deck_id,
                         version_id=version_id,
                         storage_key=storage_key,
                     )
-                    raise
-                except Exception as repository_error:
-                    result = await self._reconcile_append_exception(
-                        repository_error=repository_error,
-                        deck_id=deck_id,
-                        version_id=version_id,
-                        owner_id=owner_id,
-                        storage_key=storage_key,
-                        checksum=checksum,
-                    )
+                raise
             await self._enforce_retention(deck_id)
             return result
 
@@ -260,39 +279,46 @@ class DeckVersionService:
         checksum = await self._validate_and_hash(content)
         version_id = str(uuid4())
         storage_key = f"decks/{deck_id}/versions/{version_id}.pptx"
-        await self._storage.put(storage_key, content)
+        uploaded = False
         try:
-            result = await self._repository.append_version(
-                deck_id=deck_id,
-                owner_id=owner_id,
-                version_id=version_id,
-                storage_key=storage_key,
-                sha256=checksum,
-                size_bytes=len(content),
-                source=source,
-                created_by=created_by,
-                base_version_id=base_version_id,
-                generation_payload=generation_payload,
-                name=name,
-            )
-        except asyncio.CancelledError:
-            raise
+            async with self._repository.storage_key_guard(storage_key) as guard_session:
+                await self._storage.put(storage_key, content)
+                uploaded = True
+                try:
+                    result = await self._repository.append_version(
+                        deck_id=deck_id,
+                        owner_id=owner_id,
+                        version_id=version_id,
+                        storage_key=storage_key,
+                        sha256=checksum,
+                        size_bytes=len(content),
+                        source=source,
+                        created_by=created_by,
+                        base_version_id=base_version_id,
+                        generation_payload=generation_payload,
+                        name=name,
+                        session=guard_session,
+                    )
+                except (asyncio.CancelledError, DeckWriteRolledBackError):
+                    raise
+                except Exception as repository_error:
+                    result = await self._reconcile_append_exception(
+                        repository_error=repository_error,
+                        deck_id=deck_id,
+                        version_id=version_id,
+                        owner_id=owner_id,
+                        storage_key=storage_key,
+                        checksum=checksum,
+                        session=guard_session,
+                    )
         except DeckWriteRolledBackError:
-            await self._delete_failed_upload(
-                deck_id=deck_id,
-                version_id=version_id,
-                storage_key=storage_key,
-            )
+            if uploaded:
+                await self._delete_failed_upload(
+                    deck_id=deck_id,
+                    version_id=version_id,
+                    storage_key=storage_key,
+                )
             raise
-        except Exception as repository_error:
-            result = await self._reconcile_append_exception(
-                repository_error=repository_error,
-                deck_id=deck_id,
-                version_id=version_id,
-                owner_id=owner_id,
-                storage_key=storage_key,
-                checksum=checksum,
-            )
         await self._enforce_retention(deck_id)
         return result
 
@@ -305,9 +331,10 @@ class DeckVersionService:
         owner_id: str,
         storage_key: str,
         checksum: str,
+        session=None,
     ) -> DeckRecord:
         try:
-            deck = await self._repository.get(deck_id, owner_id)
+            deck = await self._repository.get(deck_id, owner_id, session=session)
         except Exception:
             logger.exception(
                 "deck_initial_version_reconciliation_failed",
@@ -340,9 +367,12 @@ class DeckVersionService:
         owner_id: str,
         storage_key: str,
         checksum: str,
+        session=None,
     ) -> DeckVersionRecord:
         try:
-            existing = await self._repository.version(deck_id, version_id, owner_id)
+            existing = await self._repository.version(
+                deck_id, version_id, owner_id, session=session
+            )
         except Exception:
             logger.exception(
                 "deck_version_reconciliation_failed",
@@ -387,7 +417,16 @@ class DeckVersionService:
             if version.id not in deleted:
                 continue
             try:
-                await self._storage.delete(version.storage_key)
+                async with self._repository.storage_key_guard(
+                    version.storage_key
+                ) as guard_session:
+                    if await self._repository.storage_key_referenced(
+                        version.storage_key, session=guard_session
+                    ):
+                        continue
+                    await await_destructive(
+                        self._storage.delete(version.storage_key)
+                    )
             except Exception as exc:
                 logger.warning(
                     "deck_version_retention_object_delete_failed",
@@ -407,10 +446,13 @@ class DeckVersionService:
         created_by: str,
         content_size: int,
         storage_key: str,
+        session=None,
     ) -> DeckVersionRecord:
         for retry_delay in self._retry_delays:
             await self._sleep(retry_delay)
-            existing = await self._repository.version(deck_id, version_id, owner_id)
+            existing = await self._repository.version(
+                deck_id, version_id, owner_id, session=session
+            )
             if existing is not None:
                 return self._matching_stored_version(
                     existing, checksum=checksum, storage_key=storage_key
@@ -433,13 +475,14 @@ class DeckVersionService:
                 source="onlyoffice_save",
                 created_by=created_by,
                 base_version_id=base_version_id,
+                session=session,
             )
         except asyncio.CancelledError:
             raise
         except Exception as repair_error:
             try:
                 existing = await self._repository.version(
-                    deck_id, version_id, owner_id
+                    deck_id, version_id, owner_id, session=session
                 )
             except Exception as reconciliation_error:
                 raise VersionStorageConflictError(
@@ -509,7 +552,14 @@ class DeckVersionService:
         storage_key: str,
     ) -> None:
         try:
-            await self._storage.delete(storage_key)
+            async with self._repository.storage_key_guard(
+                storage_key
+            ) as guard_session:
+                if await self._repository.storage_key_referenced(
+                    storage_key, session=guard_session
+                ):
+                    return
+                await await_destructive(self._storage.delete(storage_key))
         except Exception:
             logger.exception(
                 "deck_version_cleanup_failed",

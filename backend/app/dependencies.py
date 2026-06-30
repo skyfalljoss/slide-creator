@@ -76,7 +76,7 @@ def get_database() -> Database:
 
 @lru_cache
 def get_deck_repository() -> DeckRepository:
-    return DeckRepository(get_database())
+    return DeckRepository(get_database(), lock_dir=settings.deck_lock_dir)
 
 
 @lru_cache

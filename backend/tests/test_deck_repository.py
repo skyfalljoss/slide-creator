@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -128,6 +129,79 @@ async def test_import_initial_version_preserves_timestamps_and_global_id_visibil
     assert deck.current_version.created_at == created
     assert await repo.contains_deck_id("legacy-id") is True
     assert await repo.get("legacy-id", "someone-else") is None
+
+
+async def test_storage_key_guard_serializes_independent_sqlite_repositories(tmp_path):
+    url = f"sqlite+aiosqlite:///{tmp_path / 'guard.db'}"
+    first_database = Database(url)
+    second_database = Database(url)
+    first = DeckRepository(first_database, lock_dir=tmp_path / "locks")
+    second = DeckRepository(second_database, lock_dir=tmp_path / "locks")
+    waiter_entered = asyncio.Event()
+
+    async def wait_for_guard():
+        async with second.storage_key_guard("decks/d/version.pptx"):
+            waiter_entered.set()
+
+    try:
+        async with first.storage_key_guard("decks/d/version.pptx"):
+            waiter = asyncio.create_task(wait_for_guard())
+            await asyncio.sleep(0.05)
+            assert waiter_entered.is_set() is False
+        await asyncio.wait_for(waiter, timeout=1)
+        assert waiter_entered.is_set() is True
+    finally:
+        await first_database.dispose()
+        await second_database.dispose()
+
+
+async def test_storage_key_guard_closes_late_open_after_repeated_cancellation(
+    tmp_path, monkeypatch
+):
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'guard-open.db'}")
+    repository = DeckRepository(database, lock_dir=tmp_path / "locks")
+    open_entered = threading.Event()
+    release_open = threading.Event()
+    opened = []
+    original_open = type(tmp_path).open
+
+    def blocked_open(path, *args, **kwargs):
+        open_entered.set()
+        assert release_open.wait(timeout=2)
+        handle = original_open(path, *args, **kwargs)
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(type(tmp_path), "open", blocked_open)
+
+    async def enter_guard():
+        async with repository.storage_key_guard("decks/d/blocked-open.pptx"):
+            pytest.fail("cancelled guard must not acquire the lock")
+
+    cancelled = asyncio.create_task(enter_guard())
+    assert await asyncio.to_thread(open_entered.wait, 1)
+    cancelled.cancel()
+    cancelled.cancel()
+    await asyncio.sleep(0)
+    assert cancelled.done() is False
+
+    release_open.set()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+    assert len(opened) == 1
+    assert opened[0].closed is True
+
+    entered = asyncio.Event()
+
+    async def next_waiter():
+        async with repository.storage_key_guard("decks/d/blocked-open.pptx"):
+            entered.set()
+
+    waiter = asyncio.create_task(next_waiter())
+    await asyncio.wait_for(waiter, 1)
+    assert entered.is_set()
+    assert opened[-1].closed is True
+    await database.dispose()
 
 
 async def test_owner_scopes_user_facing_queries_and_mutations(repository):

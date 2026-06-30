@@ -41,6 +41,19 @@ async def test_postgres_concurrent_versions_and_callback_idempotency(tmp_path):
     created = False
     try:
         await first_database.create_schema()
+        second_entered = asyncio.Event()
+
+        async def enter_second_guard():
+            async with second.storage_key_guard("decks/advisory-lock-test.pptx"):
+                second_entered.set()
+
+        async with first.storage_key_guard("decks/advisory-lock-test.pptx"):
+            guard_waiter = asyncio.create_task(enter_second_guard())
+            await asyncio.sleep(0.05)
+            assert second_entered.is_set() is False
+        await asyncio.wait_for(guard_waiter, timeout=2)
+        assert second_entered.is_set() is True
+
         initial = _pptx_bytes()
         initial_key = f"{prefix}{initial_id}.pptx"
         await storage.put(initial_key, initial)

@@ -1,8 +1,12 @@
+import asyncio
+import hashlib
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
+from starlette.requests import Request
 
 from app import dependencies
 from app.main import app
@@ -10,6 +14,7 @@ from app.services.platform.database import Database
 from app.services.platform.deck_files import LocalDeckFileStorage
 from app.services.platform.deck_repository import DeckRepository
 from app.services.platform.deck_versions import DeckVersionService
+from app.routers.decks import delete_deck
 
 
 def _slides(title: str = "Cover") -> list[dict]:
@@ -28,7 +33,7 @@ def _slides(title: str = "Cover") -> list[dict]:
 async def deck_api(tmp_path):
     database = Database(f"sqlite+aiosqlite:///{tmp_path / 'decks.db'}")
     await database.create_schema()
-    repository = DeckRepository(database)
+    repository = DeckRepository(database, lock_dir=tmp_path / "locks")
     storage = LocalDeckFileStorage(tmp_path / "objects")
     versions = DeckVersionService(
         repository=repository,
@@ -206,6 +211,117 @@ async def test_delete_commits_database_before_best_effort_object_cleanup(deck_ap
     storage.delete.assert_awaited_once_with(key)
     assert await storage.exists(key) is True
     storage.delete = real_delete
+
+
+class _PausedDeleteStorage(LocalDeckFileStorage):
+    def __init__(self, root):
+        super().__init__(root)
+        self.delete_entered = asyncio.Event()
+        self.release_delete = asyncio.Event()
+
+    async def delete(self, key):
+        self.delete_entered.set()
+        await self.release_delete.wait()
+        await super().delete(key)
+
+
+async def _delete_reimport_fixture(tmp_path):
+    url = f"sqlite+aiosqlite:///{tmp_path / 'delete-race.db'}"
+    first_database = Database(url)
+    second_database = Database(url)
+    await first_database.create_schema()
+    lock_dir = tmp_path / "locks"
+    deleting_repository = DeckRepository(first_database, lock_dir=lock_dir)
+    writing_repository = DeckRepository(second_database, lock_dir=lock_dir)
+    storage = _PausedDeleteStorage(tmp_path / "objects")
+    key = "decks/reimport/versions/version-1.pptx"
+    content = b"immutable-pptx"
+    await storage.put(key, content)
+    await deleting_repository.create_with_initial_version(
+        deck_id="reimport",
+        version_id="version-1",
+        owner_id="alice",
+        name="Original",
+        deck_type="sales",
+        theme="minimalist",
+        aspect_ratio="16:9",
+        generation_payload={"slides": []},
+        storage_key=key,
+        sha256=hashlib.sha256(content).hexdigest(),
+        size_bytes=len(content),
+    )
+    request = Request(
+        {"type": "http", "method": "DELETE", "path": "/", "headers": [(b"x-user-id", b"alice")]}
+    )
+    return first_database, second_database, deleting_repository, writing_repository, storage, request, key, content
+
+
+async def _reimport(repository, storage, key, content):
+    async with repository.storage_key_guard(key) as session:
+        try:
+            await storage.put(key, content)
+        except FileExistsError:
+            pass
+        return await repository.import_with_initial_version(
+            deck_id="reimport",
+            version_id="version-1",
+            owner_id="alice",
+            name="Reimported",
+            deck_type="sales",
+            theme="minimalist",
+            aspect_ratio="16:9",
+            generation_payload={"slides": []},
+            storage_key=key,
+            sha256=hashlib.sha256(content).hexdigest(),
+            size_bytes=len(content),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            session=session,
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_guard_prevents_reimport_metadata_pointing_to_deleted_object(tmp_path):
+    fixture = await _delete_reimport_fixture(tmp_path)
+    db1, db2, deleting, writing, storage, request, key, content = fixture
+    try:
+        deletion = asyncio.create_task(delete_deck("reimport", request, deleting, storage))
+        await asyncio.wait_for(storage.delete_entered.wait(), 1)
+        writer = asyncio.create_task(_reimport(writing, storage, key, content))
+        await asyncio.sleep(0.05)
+        assert writer.done() is False
+        storage.release_delete.set()
+        await deletion
+        await writer
+        assert await writing.storage_key_referenced(key)
+        assert await storage.exists(key)
+    finally:
+        await db1.dispose()
+        await db2.dispose()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_delete_waits_for_object_delete_before_reimport(tmp_path):
+    fixture = await _delete_reimport_fixture(tmp_path)
+    db1, db2, deleting, writing, storage, request, key, content = fixture
+    try:
+        deletion = asyncio.create_task(delete_deck("reimport", request, deleting, storage))
+        await asyncio.wait_for(storage.delete_entered.wait(), 1)
+        writer = asyncio.create_task(_reimport(writing, storage, key, content))
+        deletion.cancel()
+        deletion.cancel()
+        await asyncio.sleep(0.05)
+        assert deletion.done() is False
+        assert writer.done() is False
+        storage.release_delete.set()
+        with pytest.raises(asyncio.CancelledError):
+            await deletion
+        await writer
+        assert await writing.storage_key_referenced(key)
+        assert await storage.exists(key)
+    finally:
+        await db1.dispose()
+        await db2.dispose()
 
 
 @pytest.mark.asyncio

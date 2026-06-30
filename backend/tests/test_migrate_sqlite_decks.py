@@ -1,19 +1,90 @@
 import json
 import sqlite3
+import base64
+import random
+import asyncio
+from argparse import Namespace
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from io import BytesIO
 
 from pptx import Presentation
+from PIL import Image
 import pytest
 
 from app.services.platform.database import Database
 from app.services.platform.deck_files import LocalDeckFileStorage
 from app.services.platform.deck_repository import DeckRepository
 from app.services.platform.deck_repository import DeckWriteRolledBackError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import update
 from app.services.platform.deck_models import DeckRow
 from scripts.migrate_sqlite_decks import migrate_sqlite_decks
 from scripts.migrate_sqlite_decks import MigrationLimits
+from scripts.migrate_sqlite_decks import _validate_decoded_budget
+import scripts.migrate_sqlite_decks as migration_script
+
+
+class _GuardMixin:
+    @asynccontextmanager
+    async def storage_key_guard(self, storage_key):
+        yield
+
+    async def storage_key_referenced(self, storage_key, *, session=None):
+        return False
+
+
+async def test_migration_cli_uses_configured_lock_dir_for_cross_process_coordination(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'cli.db'}"
+    lock_dir = tmp_path / "custom-locks"
+    app_database = Database(database_url)
+    app_repository = DeckRepository(app_database, lock_dir=lock_dir)
+
+    class Storage:
+        async def close(self):
+            return None
+
+    async def coordinated_migration(
+        _sqlite_path, _owner_id, script_repository, _storage, **_kwargs
+    ):
+        entered = asyncio.Event()
+
+        async def waiter():
+            async with script_repository.storage_key_guard("decks/shared.pptx"):
+                entered.set()
+
+        async with app_repository.storage_key_guard("decks/shared.pptx"):
+            task = asyncio.create_task(waiter())
+            await asyncio.sleep(0.05)
+            assert entered.is_set() is False
+        await asyncio.wait_for(task, 1)
+        assert entered.is_set()
+        return migration_script.MigrationResult(0, 0, 0, ())
+
+    monkeypatch.setattr(migration_script.settings, "database_url", database_url)
+    monkeypatch.setattr(migration_script.settings, "deck_lock_dir", str(lock_dir))
+    monkeypatch.setattr(migration_script, "_storage", lambda: Storage())
+    monkeypatch.setattr(migration_script, "migrate_sqlite_decks", coordinated_migration)
+    args = Namespace(
+        sqlite_path=tmp_path / "legacy.db",
+        owner_id="owner",
+        max_sqlite_bytes=1,
+        max_row_json_bytes=1,
+        max_json_depth=1,
+        max_slides=1,
+        max_total_text_chars=1,
+        max_text_chars=1,
+        max_list_items=1,
+        max_image_item_bytes=1,
+        max_image_bytes=1,
+        fetch_batch_size=1,
+    )
+    try:
+        assert await migration_script._main(args) == 0
+    finally:
+        await app_database.dispose()
 
 
 def _legacy_database(path, rows):
@@ -110,11 +181,11 @@ async def test_migration_compensates_definite_rollback_but_preserves_uncertain_u
         [("deck-1", "Deck", "sales", "minimalist", "16:9", json.dumps(slides), None, now, now)],
     )
 
-    class Repository:
+    class Repository(_GuardMixin):
         def __init__(self, error):
             self.error = error
 
-        async def get_global(self, deck_id):
+        async def get_global(self, deck_id, *, session=None):
             return None
 
         async def import_with_initial_version(self, **kwargs):
@@ -150,6 +221,73 @@ async def test_migration_compensates_definite_rollback_but_preserves_uncertain_u
     assert rolled_back.failed == uncertain.failed == 1
     assert len(rolled_back_storage.deleted) == 1
     assert uncertain_storage.deleted == []
+
+
+async def test_guard_exit_rollback_compensates_and_does_not_stop_following_row(tmp_path):
+    source = tmp_path / "legacy.db"
+    slides = [{"index": 1, "title": "One", "bullets": [], "notes": "", "layout": "title"}]
+    now = datetime.now(timezone.utc).isoformat()
+    _legacy_database(
+        source,
+        [
+            ("a-rollback", "Rollback", "sales", "minimalist", "16:9", json.dumps(slides), None, now, now),
+            ("z-good", "Good", "sales", "minimalist", "16:9", json.dumps(slides), None, now, now),
+        ],
+    )
+
+    class Repository:
+        def __init__(self):
+            self.guard_entries = {}
+
+        @asynccontextmanager
+        async def storage_key_guard(self, storage_key):
+            self.guard_entries[storage_key] = self.guard_entries.get(storage_key, 0) + 1
+            session = object()
+            try:
+                yield session
+            except SQLAlchemyError as cause:
+                raise DeckWriteRolledBackError("body rolled back", cause) from cause
+            if "a-rollback" in storage_key and self.guard_entries[storage_key] == 1:
+                raise DeckWriteRolledBackError(
+                    "commit rolled back", SQLAlchemyError("commit failed")
+                )
+
+        async def get_global(self, deck_id, *, session=None):
+            return None
+
+        async def import_with_initial_version(self, **kwargs):
+            return None
+
+        async def storage_key_referenced(self, storage_key, *, session=None):
+            assert session is not None
+            return False
+
+    class Storage:
+        def __init__(self):
+            self.objects = set()
+            self.deleted = []
+
+        async def put(self, key, content):
+            self.objects.add(key)
+
+        async def read(self, key):
+            raise KeyError(key)
+
+        async def delete(self, key):
+            self.deleted.append(key)
+            self.objects.discard(key)
+
+    repository = Repository()
+    storage = Storage()
+    result = await migrate_sqlite_decks(
+        source, "owner", repository, storage, template_path=None
+    )
+
+    rollback_key = next(key for key in repository.guard_entries if "a-rollback" in key)
+    assert repository.guard_entries[rollback_key] == 2
+    assert (result.migrated, result.failed) == (1, 1)
+    assert storage.deleted == [rollback_key]
+    assert all("z-good" in key for key in storage.objects)
 
 
 async def test_existing_id_requires_same_owner_and_exact_authoritative_identity(tmp_path):
@@ -205,8 +343,8 @@ async def test_concurrent_matching_winner_is_reconciled_without_deleting_object(
     real = DeckRepository(database)
     storage = LocalDeckFileStorage(tmp_path / "files")
 
-    class ConcurrentWinner:
-        async def get_global(self, deck_id):
+    class ConcurrentWinner(_GuardMixin):
+        async def get_global(self, deck_id, *, session=None):
             return await real.get_global(deck_id)
 
         async def import_with_initial_version(self, **kwargs):
@@ -241,8 +379,8 @@ async def test_compensation_delete_failure_does_not_stop_following_rows(tmp_path
     await database.create_schema()
     real = DeckRepository(database)
 
-    class Repository:
-        async def get_global(self, deck_id):
+    class Repository(_GuardMixin):
+        async def get_global(self, deck_id, *, session=None):
             return await real.get_global(deck_id)
 
         async def import_with_initial_version(self, **kwargs):
@@ -276,12 +414,12 @@ async def test_rollback_with_unavailable_reconciliation_preserves_uploaded_objec
         [("legacy", "Deck", "sales", "minimalist", "16:9", json.dumps(slides), None, now, now)],
     )
 
-    class Repository:
+    class Repository(_GuardMixin):
         lookups = 0
 
-        async def get_global(self, deck_id):
+        async def get_global(self, deck_id, *, session=None):
             self.lookups += 1
-            if self.lookups == 1:
+            if self.lookups <= 2:
                 return None
             raise OSError("database unavailable")
 
@@ -347,3 +485,72 @@ async def test_untrusted_legacy_input_is_bounded_before_rendering_and_next_row_c
 
     assert (result.migrated, result.failed) == (1, 1)
     assert render.call_count == 1
+
+
+def _large_png_b64() -> str:
+    pixels = random.Random(42).randbytes(300 * 300 * 3)
+    image = Image.frombytes("RGB", (300, 300), pixels)
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return base64.b64encode(output.getvalue()).decode("ascii")
+
+
+async def test_realistic_large_embedded_image_uses_image_budget_not_text_budget(tmp_path):
+    source = tmp_path / "legacy.db"
+    image_b64 = _large_png_b64()
+    assert len(image_b64) > 200_000
+    slides = [{
+        "index": 1,
+        "title": "Image",
+        "bullets": [],
+        "notes": "",
+        "layout": "title",
+        "image_b64": image_b64,
+    }]
+    now = datetime.now(timezone.utc).isoformat()
+    _legacy_database(
+        source,
+        [("image", "Image", "sales", "minimalist", "16:9", json.dumps(slides), None, now, now)],
+    )
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'target.db'}")
+    await database.create_schema()
+    try:
+        result = await migrate_sqlite_decks(
+            source,
+            "owner",
+            DeckRepository(database),
+            LocalDeckFileStorage(tmp_path / "files"),
+            template_path=None,
+            limits=MigrationLimits(
+                max_text_chars=100,
+                max_total_text_chars=100,
+                max_image_item_bytes=1_000_000,
+                max_image_bytes=2_000_000,
+            ),
+        )
+    finally:
+        await database.dispose()
+
+    assert (result.migrated, result.failed) == (1, 0)
+
+
+def test_oversized_image_and_data_uri_use_decoded_image_limits():
+    image_b64 = _large_png_b64()
+    with pytest.raises(ValueError, match="embedded image"):
+        _validate_decoded_budget(
+            {"image_b64": image_b64},
+            MigrationLimits(
+                max_text_chars=10,
+                max_total_text_chars=10,
+                max_image_item_bytes=100_000,
+            ),
+        )
+
+    _validate_decoded_budget(
+        {"value": f"data:image/png;base64,{image_b64}"},
+        MigrationLimits(
+            max_text_chars=10,
+            max_total_text_chars=10,
+            max_image_item_bytes=1_000_000,
+        ),
+    )

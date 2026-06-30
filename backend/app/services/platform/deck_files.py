@@ -4,7 +4,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, Protocol
+from typing import Awaitable, BinaryIO, Protocol, TypeVar
 
 from google.api_core.exceptions import NotFound, PreconditionFailed
 from google.cloud import storage as gcs
@@ -14,6 +14,29 @@ from app.config import settings
 PPTX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 DECK_STREAM_CHUNK_SIZE = 256 * 1024
 _MAX_STREAM_CHUNK_SIZE = 1024 * 1024
+_T = TypeVar("_T")
+
+
+async def await_destructive(operation: Awaitable[_T]) -> _T:
+    """Finish an irreversible operation before propagating caller cancellation."""
+    task = asyncio.ensure_future(operation)
+    cancellation: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            cancellation = exc
+        except Exception:
+            break
+    try:
+        result = task.result()
+    except Exception as exc:
+        if cancellation is not None:
+            raise cancellation from exc
+        raise
+    if cancellation is not None:
+        raise cancellation
+    return result
 
 
 class DeckFileStream(Protocol):

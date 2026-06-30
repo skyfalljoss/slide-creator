@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import asyncio
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ from google.api_core.exceptions import NotFound, PreconditionFailed
 import pytest
 
 from app.config import settings
-from app.services.platform.deck_files import GCSDeckFileStorage, LocalDeckFileStorage
+from app.services.platform.deck_files import GCSDeckFileStorage, LocalDeckFileStorage, await_destructive
 
 
 @pytest.mark.asyncio
@@ -24,6 +25,29 @@ async def test_local_storage_round_trip_and_missing_delete(tmp_path: Path):
     await storage.delete(key)
     await storage.delete(key)
     assert await storage.exists(key) is False
+
+
+@pytest.mark.asyncio
+async def test_destructive_await_repeated_cancellation_waits_and_stays_cancelled():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def failing_delete():
+        entered.set()
+        await release.wait()
+        raise OSError("delete failed")
+
+    task = asyncio.create_task(await_destructive(failing_delete()))
+    await entered.wait()
+    task.cancel()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert task.done() is False
+    release.set()
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await task
+    assert isinstance(caught.value.__cause__, OSError)
+    assert task.cancelled()
 
 
 @pytest.mark.asyncio

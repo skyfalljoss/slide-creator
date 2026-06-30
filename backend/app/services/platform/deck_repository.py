@@ -1,16 +1,22 @@
 import asyncio
+import fcntl
+import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import BinaryIO
 
 import structlog
 from sqlalchemy import delete as sqlalchemy_delete
 from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import Select
 
 from app.services.platform.database import Database
+from app.services.platform.deck_files import await_destructive
 from app.services.platform.deck_models import DeckRow, DeckVersionRow
 
 
@@ -187,8 +193,113 @@ def _deck_record(deck: DeckRow, version: DeckVersionRow | None) -> DeckRecord:
 
 
 class DeckRepository:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, lock_dir: Path | str = ".data/deck-locks") -> None:
         self._database = database
+        self._lock_dir = Path(lock_dir)
+
+    @staticmethod
+    def storage_lock_id(storage_key: str) -> int:
+        return int.from_bytes(
+            hashlib.sha256(storage_key.encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+
+    @asynccontextmanager
+    async def storage_key_guard(
+        self, storage_key: str
+    ) -> AsyncIterator[AsyncSession | None]:
+        """Coordinate object deletion with every metadata-establishing writer."""
+        dialect = self._database.engine.dialect.name
+        if dialect == "postgresql":
+            async with self._database.session() as session:
+                await session.begin()
+                try:
+                    await session.execute(
+                        text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                        {"lock_id": self.storage_lock_id(storage_key)},
+                    )
+                    yield session
+                except asyncio.CancelledError:
+                    try:
+                        await session.rollback()
+                    except BaseException:
+                        logger.exception("storage_guard_cancelled_rollback_failed")
+                    raise
+                except Exception as cause:
+                    try:
+                        await session.rollback()
+                    except Exception as rollback_error:
+                        raise DeckCommitUncertainError(
+                            "Guarded write failed and rollback outcome is uncertain",
+                            cause,
+                        ) from rollback_error
+                    if isinstance(cause, SQLAlchemyError):
+                        raise DeckWriteRolledBackError(
+                            "Guarded write rolled back before commit", cause
+                        ) from cause
+                    raise
+                try:
+                    await session.commit()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as cause:
+                    raise DeckCommitUncertainError(
+                        "Guarded write commit outcome is uncertain", cause
+                    ) from cause
+            return
+
+        lock_id = hashlib.sha256(storage_key.encode("utf-8")).hexdigest()
+
+        def open_lock() -> BinaryIO:
+            self._lock_dir.mkdir(parents=True, exist_ok=True)
+            return (self._lock_dir / f"{lock_id}.lock").open("a+b")
+
+        open_task = asyncio.create_task(asyncio.to_thread(open_lock))
+        open_cancellation: asyncio.CancelledError | None = None
+        while not open_task.done():
+            try:
+                await asyncio.shield(open_task)
+            except asyncio.CancelledError as exc:
+                open_cancellation = exc
+            except Exception:
+                break
+        try:
+            handle = open_task.result()
+        except Exception as exc:
+            if open_cancellation is not None:
+                raise open_cancellation from exc
+            raise
+        if open_cancellation is not None:
+            try:
+                await await_destructive(asyncio.to_thread(handle.close))
+            except Exception as exc:
+                raise open_cancellation from exc
+            raise open_cancellation
+
+        acquire = asyncio.create_task(
+            asyncio.to_thread(fcntl.flock, handle.fileno(), fcntl.LOCK_EX)
+        )
+        acquired = False
+        try:
+            try:
+                await await_destructive(acquire)
+            except asyncio.CancelledError:
+                if acquire.done() and acquire.exception() is None:
+                    acquired = True
+                raise
+            acquired = True
+            yield None
+        finally:
+            try:
+                if acquired:
+                    await await_destructive(
+                        asyncio.to_thread(
+                            fcntl.flock, handle.fileno(), fcntl.LOCK_UN
+                        )
+                    )
+            finally:
+                await await_destructive(asyncio.to_thread(handle.close))
 
     async def create_with_initial_version(
         self,
@@ -204,7 +315,25 @@ class DeckRepository:
         storage_key: str,
         sha256: str,
         size_bytes: int,
+        session: AsyncSession | None = None,
     ) -> DeckRecord:
+        if session is None:
+            async with self._database.session() as owned_session:
+                async with _classified_write(owned_session):
+                    return await self.create_with_initial_version(
+                        deck_id=deck_id,
+                        version_id=version_id,
+                        owner_id=owner_id,
+                        name=name,
+                        deck_type=deck_type,
+                        theme=theme,
+                        aspect_ratio=aspect_ratio,
+                        generation_payload=generation_payload,
+                        storage_key=storage_key,
+                        sha256=sha256,
+                        size_bytes=size_bytes,
+                        session=owned_session,
+                    )
         now = datetime.now(timezone.utc)
         deck = DeckRow(
             id=deck_id,
@@ -229,18 +358,15 @@ class DeckRepository:
             created_by=owner_id,
             created_at=now,
         )
-        async with self._database.session() as session:
-            async with _classified_write(session):
-                session.add(deck)
-                await session.flush()
-                session.add(version)
-                await session.flush()
-                deck.current_version_id = version_id
-                deck.updated_at = now
-                await session.flush()
-                await session.refresh(deck)
-                record = _deck_record(deck, version)
-        return record
+        session.add(deck)
+        await session.flush()
+        session.add(version)
+        await session.flush()
+        deck.current_version_id = version_id
+        deck.updated_at = now
+        await session.flush()
+        await session.refresh(deck)
+        return _deck_record(deck, version)
 
     async def import_with_initial_version(
         self,
@@ -258,8 +384,28 @@ class DeckRepository:
         size_bytes: int,
         created_at: datetime,
         updated_at: datetime,
+        session: AsyncSession | None = None,
     ) -> DeckRecord:
         """Import one legacy deck without rewriting its authoritative timestamps."""
+        if session is None:
+            async with self._database.session() as owned_session:
+                async with _classified_write(owned_session):
+                    return await self.import_with_initial_version(
+                        deck_id=deck_id,
+                        version_id=version_id,
+                        owner_id=owner_id,
+                        name=name,
+                        deck_type=deck_type,
+                        theme=theme,
+                        aspect_ratio=aspect_ratio,
+                        generation_payload=generation_payload,
+                        storage_key=storage_key,
+                        sha256=sha256,
+                        size_bytes=size_bytes,
+                        created_at=created_at,
+                        updated_at=updated_at,
+                        session=owned_session,
+                    )
         created_at = _utc(created_at)
         updated_at = _utc(updated_at)
         deck = DeckRow(
@@ -285,25 +431,18 @@ class DeckRepository:
             created_by=owner_id,
             created_at=created_at,
         )
-        async with self._database.session() as session:
-            async with _classified_write(session):
-                session.add(deck)
-                await session.flush()
-                session.add(version)
-                await session.flush()
-                deck.current_version_id = version_id
-                # The ORM column has an automatic on-update value. Explicitly
-                # retain the legacy timestamp while setting the current pointer.
-                deck.updated_at = updated_at
-                await session.flush()
-                await session.execute(
-                    update(DeckRow)
-                    .where(DeckRow.id == deck_id)
-                    .values(updated_at=updated_at)
-                )
-                await session.refresh(deck)
-                record = _deck_record(deck, version)
-        return record
+        session.add(deck)
+        await session.flush()
+        session.add(version)
+        await session.flush()
+        deck.current_version_id = version_id
+        deck.updated_at = updated_at
+        await session.flush()
+        await session.execute(
+            update(DeckRow).where(DeckRow.id == deck_id).values(updated_at=updated_at)
+        )
+        await session.refresh(deck)
+        return _deck_record(deck, version)
 
     async def contains_deck_id(self, deck_id: str) -> bool:
         """Check a global primary key without exposing deck data across owners."""
@@ -312,38 +451,50 @@ class DeckRepository:
                 select(DeckRow.id).where(DeckRow.id == deck_id)
             ) is not None
 
-    async def get_global(self, deck_id: str) -> DeckRecord | None:
+    async def get_global(
+        self, deck_id: str, *, session: AsyncSession | None = None
+    ) -> DeckRecord | None:
         """Internal migration lookup that is deliberately not used by API routes."""
-        async with self._database.session() as session:
-            deck = await session.get(DeckRow, deck_id)
-            if deck is None:
-                return None
-            version = None
-            if deck.current_version_id is not None:
-                version = await session.scalar(
-                    select(DeckVersionRow).where(
-                        DeckVersionRow.id == deck.current_version_id,
-                        DeckVersionRow.deck_id == deck.id,
-                    )
+        if session is None:
+            async with self._database.session() as owned_session:
+                return await self.get_global(deck_id, session=owned_session)
+        deck = await session.get(DeckRow, deck_id)
+        if deck is None:
+            return None
+        version = None
+        if deck.current_version_id is not None:
+            version = await session.scalar(
+                select(DeckVersionRow).where(
+                    DeckVersionRow.id == deck.current_version_id,
+                    DeckVersionRow.deck_id == deck.id,
                 )
-            return _deck_record(deck, version)
+            )
+        return _deck_record(deck, version)
 
-    async def get(self, deck_id: str, owner_id: str) -> DeckRecord | None:
-        async with self._database.session() as session:
-            deck = await session.scalar(
+    async def get(
+        self,
+        deck_id: str,
+        owner_id: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> DeckRecord | None:
+        if session is None:
+            async with self._database.session() as owned_session:
+                return await self.get(deck_id, owner_id, session=owned_session)
+        deck = await session.scalar(
                 select(DeckRow).where(DeckRow.id == deck_id, DeckRow.owner_id == owner_id)
             )
-            if deck is None:
-                return None
-            version = None
-            if deck.current_version_id is not None:
-                version = await session.scalar(
-                    select(DeckVersionRow).where(
-                        DeckVersionRow.id == deck.current_version_id,
-                        DeckVersionRow.deck_id == deck.id,
-                    )
+        if deck is None:
+            return None
+        version = None
+        if deck.current_version_id is not None:
+            version = await session.scalar(
+                select(DeckVersionRow).where(
+                    DeckVersionRow.id == deck.current_version_id,
+                    DeckVersionRow.deck_id == deck.id,
                 )
-            return _deck_record(deck, version)
+            )
+        return _deck_record(deck, version)
 
     async def list_all(
         self,
@@ -463,25 +614,41 @@ class DeckRepository:
         base_version_id: str | None = None,
         generation_payload: dict | None = None,
         name: str | None = None,
+        session: AsyncSession | None = None,
     ) -> DeckVersionRecord:
+        if session is None:
+            async with self._database.session() as owned_session:
+                dialect_name = owned_session.bind.dialect.name if owned_session.bind else ""
+                async with _classified_write(
+                    owned_session, sqlite_immediate=dialect_name == "sqlite"
+                ):
+                    return await self.append_version(
+                        deck_id=deck_id,
+                        owner_id=owner_id,
+                        version_id=version_id,
+                        storage_key=storage_key,
+                        sha256=sha256,
+                        size_bytes=size_bytes,
+                        source=source,
+                        created_by=created_by,
+                        base_version_id=base_version_id,
+                        generation_payload=generation_payload,
+                        name=name,
+                        session=owned_session,
+                    )
         now = datetime.now(timezone.utc)
-        async with self._database.session() as session:
-            dialect_name = session.bind.dialect.name if session.bind is not None else ""
-            async with _classified_write(
-                session,
-                sqlite_immediate=dialect_name == "sqlite",
-            ):
-                deck = await session.scalar(
+        dialect_name = session.bind.dialect.name if session.bind is not None else ""
+        deck = await session.scalar(
                     _owned_deck_for_write(
                         deck_id,
                         owner_id,
                         dialect_name,
                     )
                 )
-                if deck is None:
-                    raise LookupError("Deck not found")
-                if base_version_id is not None and base_version_id != deck.current_version_id:
-                    logger.warning(
+        if deck is None:
+            raise LookupError("Deck not found")
+        if base_version_id is not None and base_version_id != deck.current_version_id:
+            logger.warning(
                         "deck_version_stale_base",
                         deck_id=deck_id,
                         owner_id=owner_id,
@@ -489,12 +656,12 @@ class DeckRepository:
                         current_version_id=deck.current_version_id,
                         new_version_id=version_id,
                     )
-                maximum = await session.scalar(
+        maximum = await session.scalar(
                     select(func.max(DeckVersionRow.version_number)).where(
                         DeckVersionRow.deck_id == deck_id
                     )
                 )
-                version = DeckVersionRow(
+        version = DeckVersionRow(
                     id=version_id,
                     deck_id=deck_id,
                     version_number=(maximum or 0) + 1,
@@ -505,25 +672,31 @@ class DeckRepository:
                     created_by=created_by,
                     created_at=now,
                 )
-                session.add(version)
-                await session.flush()
-                deck.current_version_id = version_id
-                deck.updated_at = now
-                if generation_payload is not None:
-                    deck.generation_payload = generation_payload
-                if name is not None:
-                    deck.name = name
-                await session.flush()
-            return _version_record(version)
+        session.add(version)
+        await session.flush()
+        deck.current_version_id = version_id
+        deck.updated_at = now
+        if generation_payload is not None:
+            deck.generation_payload = generation_payload
+        if name is not None:
+            deck.name = name
+        await session.flush()
+        return _version_record(version)
 
     async def version(
         self,
         deck_id: str,
         version_id: str,
         owner_id: str,
+        *,
+        session: AsyncSession | None = None,
     ) -> DeckVersionRecord | None:
-        async with self._database.session() as session:
-            row = await session.scalar(
+        if session is None:
+            async with self._database.session() as owned_session:
+                return await self.version(
+                    deck_id, version_id, owner_id, session=owned_session
+                )
+        row = await session.scalar(
                 select(DeckVersionRow)
                 .join(DeckRow, DeckRow.id == DeckVersionRow.deck_id)
                 .where(
@@ -532,7 +705,7 @@ class DeckRepository:
                     DeckRow.owner_id == owner_id,
                 )
             )
-            return _version_record(row) if row is not None else None
+        return _version_record(row) if row is not None else None
 
     async def stale_versions(self, deck_id: str, keep: int) -> list[DeckVersionRecord]:
         if keep < 1:
@@ -583,10 +756,16 @@ class DeckRepository:
         async with self._database.session() as session:
             return set(await session.scalars(select(DeckVersionRow.storage_key)))
 
-    async def storage_key_referenced(self, storage_key: str) -> bool:
+    async def storage_key_referenced(
+        self, storage_key: str, *, session: AsyncSession | None = None
+    ) -> bool:
         """Recheck one cleanup candidate in a fresh transaction snapshot."""
-        async with self._database.session() as session:
-            return await session.scalar(
+        if session is None:
+            async with self._database.session() as owned_session:
+                return await self.storage_key_referenced(
+                    storage_key, session=owned_session
+                )
+        return await session.scalar(
                 select(DeckVersionRow.id).where(
                     DeckVersionRow.storage_key == storage_key
                 )

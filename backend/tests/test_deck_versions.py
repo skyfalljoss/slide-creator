@@ -1,11 +1,13 @@
 import asyncio
 import hashlib
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from io import BytesIO
 from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, uuid5
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.schemas import SlideData
 from app.services.platform.deck_repository import DeckRecord, DeckVersionRecord
@@ -126,7 +128,49 @@ class BlockingStorage(FakeStorage):
         self.objects[key] = content
 
 
-class InitialRepository:
+class GuardedRepository:
+    @asynccontextmanager
+    async def storage_key_guard(self, storage_key: str):
+        yield
+
+    async def storage_key_referenced(self, storage_key: str, *, session=None) -> bool:
+        versions = getattr(self, "versions", {})
+        return any(
+            version.storage_key == storage_key for version in versions.values()
+        )
+
+
+class ExitClassifyingGuard:
+    def __init__(self) -> None:
+        self.guard_entries = 0
+        self.first_exit_error: BaseException | None = None
+        self.reference_error: Exception | None = None
+        self.reference_before_reacquire = False
+        self.second_guard_error: Exception | None = None
+        self.guard_sessions: list[object] = []
+
+    @asynccontextmanager
+    async def storage_key_guard(self, storage_key: str):
+        self.guard_entries += 1
+        if self.guard_entries == 2 and self.second_guard_error is not None:
+            raise self.second_guard_error
+        session = object()
+        self.guard_sessions.append(session)
+        try:
+            yield session
+        except SQLAlchemyError as cause:
+            raise DeckWriteRolledBackError("guard rolled back body", cause) from cause
+        if self.guard_entries == 1 and self.first_exit_error is not None:
+            raise self.first_exit_error
+
+    async def storage_key_referenced(self, storage_key: str, *, session=None) -> bool:
+        assert session is self.guard_sessions[-1]
+        if self.reference_error is not None:
+            raise self.reference_error
+        return self.reference_before_reacquire
+
+
+class InitialRepository(GuardedRepository):
     def __init__(self, storage: FakeStorage) -> None:
         self.storage = storage
         self.kwargs: dict | None = None
@@ -149,13 +193,13 @@ class InitialRepository:
             raise self.error
         return result
 
-    async def get(self, deck_id: str, owner_id: str) -> DeckRecord | None:
+    async def get(self, deck_id: str, owner_id: str, *, session=None) -> DeckRecord | None:
         if self.reconciliation_error:
             raise self.reconciliation_error
         return self.committed
 
 
-class VersionRepository:
+class VersionRepository(GuardedRepository):
     def __init__(self, current: DeckRecord | None = None) -> None:
         self.current = current
         self.versions: dict[str, DeckVersionRecord] = {}
@@ -169,13 +213,13 @@ class VersionRepository:
         self.commit_before_append_error = False
         self.version_error: Exception | None = None
 
-    async def get(self, deck_id: str, owner_id: str) -> DeckRecord | None:
+    async def get(self, deck_id: str, owner_id: str, *, session=None) -> DeckRecord | None:
         if self.current is None or self.current.id != deck_id or self.current.owner_id != owner_id:
             return None
         return self.current
 
     async def version(
-        self, deck_id: str, version_id: str, owner_id: str
+        self, deck_id: str, version_id: str, owner_id: str, *, session=None
     ) -> DeckVersionRecord | None:
         if self.version_error and self.append_calls:
             raise self.version_error
@@ -289,6 +333,112 @@ async def test_create_generated_deck_deletes_upload_when_metadata_fails():
 
     assert storage.objects == {}
     assert storage.events == ["upload", "delete"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_point", ["body", "commit"])
+async def test_create_generated_deck_compensates_rollback_classified_on_guard_exit(
+    failure_point,
+):
+    storage = FakeStorage()
+
+    class Repository(ExitClassifyingGuard, InitialRepository):
+        def __init__(self):
+            ExitClassifyingGuard.__init__(self)
+            InitialRepository.__init__(self, storage)
+            if failure_point == "body":
+                self.error = SQLAlchemyError("flush failed")
+            else:
+                self.first_exit_error = DeckWriteRolledBackError(
+                    "commit rolled back", SQLAlchemyError("commit failed")
+                )
+
+    repository = Repository()
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    with pytest.raises(DeckWriteRolledBackError):
+        await service.create_generated_deck(
+            owner_id="owner-1",
+            name="Deck",
+            deck_type="pitch",
+            theme="minimalist",
+            aspect_ratio="16:9",
+            slides=[slide()],
+        )
+
+    assert repository.guard_entries == 2
+    assert repository.guard_sessions[0] is not repository.guard_sessions[1]
+    assert storage.objects == {}
+    assert storage.events == ["upload", "delete"]
+
+
+@pytest.mark.asyncio
+async def test_create_generated_deck_preserves_uncertain_guard_commit():
+    storage = FakeStorage()
+
+    class Repository(ExitClassifyingGuard, InitialRepository):
+        def __init__(self):
+            ExitClassifyingGuard.__init__(self)
+            InitialRepository.__init__(self, storage)
+            self.first_exit_error = DeckCommitUncertainError(
+                "commit uncertain", SQLAlchemyError("connection lost")
+            )
+
+    repository = Repository()
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    with pytest.raises(DeckCommitUncertainError):
+        await service.create_generated_deck(
+            owner_id="owner-1",
+            name="Deck",
+            deck_type="pitch",
+            theme="minimalist",
+            aspect_ratio="16:9",
+            slides=[slide()],
+        )
+
+    assert repository.guard_entries == 1
+    assert len(storage.objects) == 1
+    assert "delete" not in storage.events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("compensation_failure", ["winner", "guard", "reference"])
+async def test_create_generated_deck_preserves_upload_when_fresh_compensation_is_unsafe(
+    compensation_failure,
+):
+    storage = FakeStorage()
+
+    class Repository(ExitClassifyingGuard, InitialRepository):
+        def __init__(self):
+            ExitClassifyingGuard.__init__(self)
+            InitialRepository.__init__(self, storage)
+            self.first_exit_error = DeckWriteRolledBackError(
+                "commit rolled back", SQLAlchemyError("commit failed")
+            )
+            if compensation_failure == "winner":
+                self.reference_before_reacquire = True
+            elif compensation_failure == "guard":
+                self.second_guard_error = OSError("guard unavailable")
+            else:
+                self.reference_error = OSError("reference lookup failed")
+
+    repository = Repository()
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    with pytest.raises(DeckWriteRolledBackError):
+        await service.create_generated_deck(
+            owner_id="owner-1",
+            name="Deck",
+            deck_type="pitch",
+            theme="minimalist",
+            aspect_ratio="16:9",
+            slides=[slide()],
+        )
+
+    assert repository.guard_entries == 2
+    assert len(storage.objects) == 1
+    assert "delete" not in storage.events
 
 
 @pytest.mark.asyncio
@@ -568,6 +718,115 @@ async def test_save_edited_version_deletes_object_after_confirmed_rollback():
             created_by="editor",
         )
 
+    assert storage.objects == {}
+    assert storage.events[-1] == "delete"
+
+
+@pytest.mark.asyncio
+async def test_save_edited_version_compensates_rollback_classified_on_guard_exit():
+    current = version_record()
+
+    class Repository(ExitClassifyingGuard, VersionRepository):
+        def __init__(self):
+            ExitClassifyingGuard.__init__(self)
+            VersionRepository.__init__(self, deck_record(current))
+            self.first_exit_error = DeckWriteRolledBackError(
+                "commit rolled back", SQLAlchemyError("commit failed")
+            )
+
+        async def storage_key_referenced(self, storage_key: str, *, session=None) -> bool:
+            assert session is self.guard_sessions[-1]
+            # Simulate the first guarded transaction having rolled back its fake row.
+            return False
+
+    repository = Repository()
+    storage = FakeStorage()
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    with pytest.raises(DeckWriteRolledBackError):
+        await service.save_edited_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            content=pptx_bytes("guard-exit rollback"),
+            base_version_id=current.id,
+            callback_key="callback-guard-exit",
+            created_by="editor",
+        )
+
+    assert repository.guard_entries == 2
+    assert storage.objects == {}
+    assert storage.events[-1] == "delete"
+
+
+@pytest.mark.asyncio
+async def test_guard_rollback_before_upload_does_not_delete_existing_orphan():
+    current = version_record()
+    content = pptx_bytes("existing orphan")
+    checksum = hashlib.sha256(content).hexdigest()
+    version_id = str(
+        uuid5(NAMESPACE_URL, f"slideforge:deck-1:callback-before-upload:{checksum}")
+    )
+    storage_key = f"decks/deck-1/versions/{version_id}.pptx"
+
+    class Repository(ExitClassifyingGuard, VersionRepository):
+        def __init__(self):
+            ExitClassifyingGuard.__init__(self)
+            VersionRepository.__init__(self, deck_record(current))
+
+        async def version(self, *args, **kwargs):
+            raise SQLAlchemyError("lookup failed")
+
+    repository = Repository()
+    storage = FakeStorage()
+    storage.objects[storage_key] = content
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    with pytest.raises(DeckWriteRolledBackError):
+        await service.save_edited_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            content=content,
+            base_version_id=current.id,
+            callback_key="callback-before-upload",
+            created_by="editor",
+        )
+
+    assert repository.guard_entries == 1
+    assert storage.objects[storage_key] == content
+    assert storage.events == []
+
+
+@pytest.mark.asyncio
+async def test_generated_append_compensates_rollback_classified_on_guard_exit():
+    current = version_record()
+
+    class Repository(ExitClassifyingGuard, VersionRepository):
+        def __init__(self):
+            ExitClassifyingGuard.__init__(self)
+            VersionRepository.__init__(self, deck_record(current))
+            self.first_exit_error = DeckWriteRolledBackError(
+                "commit rolled back", SQLAlchemyError("commit failed")
+            )
+
+        async def storage_key_referenced(self, storage_key: str, *, session=None) -> bool:
+            assert session is self.guard_sessions[-1]
+            return False
+
+    repository = Repository()
+    storage = FakeStorage()
+    service = DeckVersionService(repository, storage, None, 50_000_000, 5)
+
+    with pytest.raises(DeckWriteRolledBackError):
+        await service.save_slides_as_version(
+            deck_id="deck-1",
+            owner_id="owner-1",
+            slides=[slide("new")],
+            theme="minimalist",
+            aspect_ratio="16:9",
+            created_by="generator",
+        )
+
+    assert repository.guard_entries == 2
     assert storage.objects == {}
     assert storage.events[-1] == "delete"
 

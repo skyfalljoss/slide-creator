@@ -120,6 +120,7 @@ async def test_real_onlyoffice_docs_api_and_force_save_callback(tmp_path):
             "ONLYOFFICE_SMOKE_JWT_SECRET or ONLYOFFICE_JWT_SECRET is required"
         )
     database = Database(f"sqlite+aiosqlite:///{tmp_path / 'smoke.db'}")
+    previous_overrides = dict(app.dependency_overrides)
     repository = DeckRepository(database)
     storage = LocalDeckFileStorage(tmp_path / "files")
     deck_id, version_id = str(uuid4()), str(uuid4())
@@ -241,6 +242,7 @@ async def test_real_onlyoffice_docs_api_and_force_save_callback(tmp_path):
             assert len(Presentation(BytesIO(downloaded.content)).slides) == 2
     finally:
         app.dependency_overrides.clear()
+        app.dependency_overrides.update(previous_overrides)
         try:
             if download_client is not None:
                 await download_client.aclose()

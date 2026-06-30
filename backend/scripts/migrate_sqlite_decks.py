@@ -2,6 +2,8 @@
 
 import argparse
 import asyncio
+import base64
+import binascii
 import hashlib
 import json
 import sqlite3
@@ -18,6 +20,7 @@ from app.services.platform.deck_files import (
     DeckFileStorage,
     GCSDeckFileStorage,
     LocalDeckFileStorage,
+    await_destructive,
 )
 from app.services.platform.deck_repository import (
     DeckRecord,
@@ -29,8 +32,12 @@ from app.services.presentation.pptx_validation import validate_pptx
 
 
 class MigrationRepository(Protocol):
-    async def get_global(self, deck_id: str) -> DeckRecord | None: ...
+    async def get_global(self, deck_id: str, *, session=None) -> DeckRecord | None: ...
     async def import_with_initial_version(self, **kwargs: Any) -> Any: ...
+    async def storage_key_referenced(
+        self, storage_key: str, *, session=None
+    ) -> bool: ...
+    def storage_key_guard(self, storage_key: str): ...
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,7 @@ class MigrationLimits:
     max_total_text_chars: int = 2_000_000
     max_text_chars: int = 200_000
     max_list_items: int = 20_000
+    max_image_item_bytes: int = 20_000_000
     max_image_bytes: int = 50_000_000
     fetch_batch_size: int = 100
 
@@ -106,15 +114,28 @@ def _validate_decoded_budget(value: object, limits: MigrationLimits) -> None:
             for nested in item:
                 visit(nested, depth + 1, field)
         elif isinstance(item, str):
+            is_data_image = item.startswith("data:image/")
+            if field == "image_b64" or is_data_image:
+                encoded = item
+                if is_data_image:
+                    header, separator, encoded = item.partition(",")
+                    if not separator or not header.endswith(";base64"):
+                        raise ValueError("embedded image data URI is invalid")
+                try:
+                    decoded = base64.b64decode(encoded, validate=True)
+                except (binascii.Error, ValueError) as exc:
+                    raise ValueError("embedded image base64 is invalid") from exc
+                if len(decoded) > limits.max_image_item_bytes:
+                    raise ValueError("an embedded image exceeds the decoded size limit")
+                image_bytes += len(decoded)
+                if image_bytes > limits.max_image_bytes:
+                    raise ValueError("embedded images exceed the decoded size limit")
+                return
             if len(item) > limits.max_text_chars:
                 raise ValueError("a text field exceeds the character limit")
             text_chars += len(item)
             if text_chars > limits.max_total_text_chars:
                 raise ValueError("deck text exceeds the total character limit")
-            if field == "image_b64":
-                image_bytes += (len(item) * 3) // 4
-                if image_bytes > limits.max_image_bytes:
-                    raise ValueError("embedded images exceed the decoded size limit")
 
     visit(value, 0)
 
@@ -313,6 +334,91 @@ async def _matching_existing(
     return len(content) == size_bytes and hashlib.sha256(content).hexdigest() == checksum
 
 
+async def _persist_migration_row(
+    *,
+    deck_id: str,
+    owner_id: str,
+    content: bytes,
+    identity: dict[str, Any],
+    repository: MigrationRepository,
+    storage: DeckFileStorage,
+) -> tuple[str, str | None]:
+    storage_key = str(identity["storage_key"])
+    checksum = str(identity["checksum"])
+    uploaded = False
+    try:
+        async with repository.storage_key_guard(storage_key) as guard_session:
+            existing = await repository.get_global(deck_id, session=guard_session)
+            if existing is not None:
+                if existing.owner_id != owner_id:
+                    raise ValueError("deck ID already belongs to another owner")
+                if await _matching_existing(existing, storage=storage, **identity):
+                    return "skipped", None
+                raise ValueError(
+                    "existing same-owner deck does not match authoritative version 1"
+                )
+            try:
+                await storage.put(storage_key, content)
+                uploaded = True
+            except FileExistsError:
+                stored_content = await storage.read(storage_key)
+                if hashlib.sha256(stored_content).hexdigest() != checksum:
+                    raise ValueError("existing migration object has a different checksum")
+            try:
+                await repository.import_with_initial_version(
+                    deck_id=deck_id,
+                    version_id=identity["version_id"],
+                    owner_id=owner_id,
+                    name=identity["name"],
+                    deck_type=identity["deck_type"],
+                    theme=identity["theme"],
+                    aspect_ratio=identity["aspect_ratio"],
+                    generation_payload=identity["payload"],
+                    storage_key=storage_key,
+                    sha256=checksum,
+                    size_bytes=identity["size_bytes"],
+                    created_at=identity["created_at"],
+                    updated_at=identity["updated_at"],
+                    session=guard_session,
+                )
+            except (asyncio.CancelledError, DeckWriteRolledBackError):
+                raise
+            except Exception:
+                winner = await repository.get_global(deck_id, session=guard_session)
+                if await _matching_existing(winner, storage=storage, **identity):
+                    return "skipped", None
+                raise
+    except DeckWriteRolledBackError as exc:
+        reason = type(exc.cause).__name__
+        if not uploaded:
+            return "failed", reason
+        compensation_phase = "reconciliation"
+        try:
+            async with repository.storage_key_guard(storage_key) as guard_session:
+                winner = await repository.get_global(deck_id, session=guard_session)
+                if await _matching_existing(winner, storage=storage, **identity):
+                    return "skipped", None
+                if await repository.storage_key_referenced(
+                    storage_key, session=guard_session
+                ):
+                    return "failed", reason
+                compensation_phase = "delete"
+                await await_destructive(storage.delete(storage_key))
+        except Exception as compensation_error:
+            if compensation_phase == "delete":
+                reason += (
+                    "; compensation delete failed "
+                    f"({type(compensation_error).__name__})"
+                )
+            else:
+                reason += (
+                    "; reconciliation failed "
+                    f"({type(compensation_error).__name__})"
+                )
+        return "failed", reason
+    return "migrated", None
+
+
 async def migrate_sqlite_decks(
     sqlite_path: Path | str,
     owner_id: str,
@@ -339,8 +445,6 @@ async def migrate_sqlite_decks(
         ):
             for row in rows:
                 deck_id = str(row["id"] or "").strip()
-                uploaded = False
-                storage_key = ""
                 identity: dict[str, Any] | None = None
                 try:
                     if not deck_id or len(deck_id) > 36:
@@ -395,75 +499,24 @@ async def migrate_sqlite_decks(
                         "created_at": created_at,
                         "updated_at": updated_at,
                     }
-                    if existing_deck is not None:
-                        if await _matching_existing(
-                            existing_deck, storage=storage, **identity
-                        ):
-                            skipped += 1
-                            continue
-                        raise ValueError(
-                            "existing same-owner deck does not match authoritative version 1"
-                        )
-                    try:
-                        await storage.put(storage_key, content)
-                        uploaded = True
-                    except FileExistsError:
-                        stored_content = await storage.read(storage_key)
-                        if hashlib.sha256(stored_content).hexdigest() != checksum:
-                            raise ValueError(
-                                "existing migration object has a different checksum"
-                            )
-                    await repository.import_with_initial_version(
+                    outcome, reason = await _persist_migration_row(
                         deck_id=deck_id,
-                        version_id=version_id,
                         owner_id=owner_id,
-                        name=name,
-                        deck_type=deck_type,
-                        theme=theme,
-                        aspect_ratio=aspect_ratio,
-                        generation_payload=payload,
-                        storage_key=storage_key,
-                        sha256=checksum,
-                        size_bytes=len(content),
-                        created_at=created_at,
-                        updated_at=updated_at,
+                        content=content,
+                        identity=identity,
+                        repository=repository,
+                        storage=storage,
                     )
-                    migrated += 1
+                    if outcome == "migrated":
+                        migrated += 1
+                    elif outcome == "skipped":
+                        skipped += 1
+                    else:
+                        failures.append(
+                            MigrationFailure(deck_id or "<missing>", reason or "failed")
+                        )
                 except asyncio.CancelledError:
                     raise
-                except DeckWriteRolledBackError as exc:
-                    reason = type(exc.cause).__name__
-                    reconciliation_safe = True
-                    try:
-                        winner = await repository.get_global(deck_id)
-                        winner_matches = identity is not None and await _matching_existing(
-                            winner, storage=storage, **identity
-                        )
-                    except Exception as reconciliation_error:
-                        winner = None
-                        winner_matches = False
-                        reconciliation_safe = False
-                        reason += (
-                            "; reconciliation failed "
-                            f"({type(reconciliation_error).__name__})"
-                        )
-                    if winner_matches:
-                        skipped += 1
-                        continue
-                    winner_key = (
-                        winner.current_version.storage_key
-                        if winner is not None and winner.current_version is not None
-                        else None
-                    )
-                    if uploaded and reconciliation_safe and winner_key != storage_key:
-                        try:
-                            await storage.delete(storage_key)
-                        except Exception as compensation_error:
-                            reason += (
-                                "; compensation delete failed "
-                                f"({type(compensation_error).__name__})"
-                            )
-                    failures.append(MigrationFailure(deck_id or "<missing>", reason))
                 except Exception as exc:
                     # Unknown repository failures can represent an uncertain commit.
                     # Preserve immutable data for later reconciliation.
@@ -487,7 +540,7 @@ async def _main(args: argparse.Namespace) -> int:
         result = await migrate_sqlite_decks(
             args.sqlite_path,
             args.owner_id,
-            DeckRepository(database),
+            DeckRepository(database, lock_dir=settings.deck_lock_dir),
             storage,
             template_path=settings.sample_template_path,
             max_file_bytes=settings.onlyoffice_max_file_bytes,
@@ -499,6 +552,7 @@ async def _main(args: argparse.Namespace) -> int:
                 max_total_text_chars=args.max_total_text_chars,
                 max_text_chars=args.max_text_chars,
                 max_list_items=args.max_list_items,
+                max_image_item_bytes=args.max_image_item_bytes,
                 max_image_bytes=args.max_image_bytes,
                 fetch_batch_size=args.fetch_batch_size,
             ),
@@ -527,6 +581,7 @@ def main() -> int:
     parser.add_argument("--max-total-text-chars", type=int, default=2_000_000)
     parser.add_argument("--max-text-chars", type=int, default=200_000)
     parser.add_argument("--max-list-items", type=int, default=20_000)
+    parser.add_argument("--max-image-item-bytes", type=int, default=20_000_000)
     parser.add_argument("--max-image-bytes", type=int, default=50_000_000)
     parser.add_argument("--fetch-batch-size", type=int, default=100)
     return asyncio.run(_main(parser.parse_args()))

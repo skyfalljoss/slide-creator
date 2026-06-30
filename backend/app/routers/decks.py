@@ -19,7 +19,7 @@ from app.models.schemas import (
     UpdateDeckResponse,
 )
 from app.services.platform.auth import get_user_id
-from app.services.platform.deck_files import DeckFileStorage
+from app.services.platform.deck_files import DeckFileStorage, await_destructive
 from app.services.platform.deck_repository import DeckRecord, DeckRepository
 from app.services.platform.deck_versions import DeckNotFoundError, DeckVersionService
 
@@ -179,13 +179,19 @@ async def delete_deck(
 
     for key in keys:
         try:
-            await storage.delete(key)
+            async with repository.storage_key_guard(key) as guard_session:
+                if await repository.storage_key_referenced(
+                    key, session=guard_session
+                ):
+                    continue
+                await await_destructive(storage.delete(key))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             await logger.aerror(
                 "deck_object_cleanup_failed",
                 deck_id=deck_id,
+                storage_key=key,
                 failure_type=type(exc).__name__,
             )
     return DeleteDeckResponse(ok=True)

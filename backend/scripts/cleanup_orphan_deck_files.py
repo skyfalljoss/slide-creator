@@ -13,6 +13,7 @@ from app.services.platform.deck_files import (
     DeckFileStorage,
     GCSDeckFileStorage,
     LocalDeckFileStorage,
+    await_destructive,
 )
 from app.services.platform.deck_repository import DeckRepository
 
@@ -20,6 +21,7 @@ from app.services.platform.deck_repository import DeckRepository
 class StorageKeyRepository(Protocol):
     async def all_storage_keys(self) -> set[str]: ...
     async def storage_key_referenced(self, storage_key: str) -> bool: ...
+    def storage_key_guard(self, storage_key: str): ...
 
 
 @dataclass(frozen=True)
@@ -77,25 +79,32 @@ async def cleanup_orphan_deck_files(
                 continue
             candidates += 1
             if apply:
+                failure_phase = "guard/recheck"
                 try:
-                    if await repository.storage_key_referenced(item.key):
-                        retained += 1
-                        candidates -= 1
-                        continue
+                    guard = repository.storage_key_guard(item.key)
+                    async with guard as guard_session:
+                        referenced_now = await repository.storage_key_referenced(
+                            item.key, session=guard_session
+                        )
+                        if referenced_now:
+                            retained += 1
+                            candidates -= 1
+                            continue
+                        failure_phase = "delete"
+                        await await_destructive(storage.delete(item.key))
+                        failure_phase = "guard/recheck"
+                    deleted += 1
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:
                     retained += 1
-                    candidates -= 1
+                    if failure_phase != "delete":
+                        candidates -= 1
                     failed += 1
                     failures.append(
-                        f"reference recheck failed ({type(exc).__name__}): {item.key}"
+                        f"storage {failure_phase} failed "
+                        f"({type(exc).__name__}): {item.key}"
                     )
-                    continue
-                try:
-                    await storage.delete(item.key)
-                    deleted += 1
-                except Exception as exc:
-                    failed += 1
-                    failures.append(f"delete failed ({type(exc).__name__}): {item.key}")
     return CleanupResult(
         len(objects), retained, candidates, deleted, failed, tuple(failures)
     )
@@ -112,7 +121,9 @@ async def _main(args: argparse.Namespace) -> int:
     storage = _storage()
     try:
         result = await cleanup_orphan_deck_files(
-            DeckRepository(database), storage, apply=args.apply
+            DeckRepository(database, lock_dir=settings.deck_lock_dir),
+            storage,
+            apply=args.apply,
         )
     finally:
         await database.dispose()
