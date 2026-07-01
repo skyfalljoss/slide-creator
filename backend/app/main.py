@@ -24,7 +24,7 @@ def _configure_logging() -> None:
             processors=[
                 structlog.contextvars.merge_contextvars,
                 structlog.processors.add_log_level,
-                structlog.processors.StackFormatterRenderer(),
+                structlog.processors.ExceptionRenderer(),
                 structlog.processors.JSONRenderer(),
             ],
             wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
