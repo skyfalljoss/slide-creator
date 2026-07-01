@@ -122,3 +122,27 @@ def test_example_environment_and_make_targets_are_documented() -> None:
 
     assert "systemd" in readme
     assert "restore" in readme.lower()
+
+
+def test_local_dev_starts_and_configures_onlyoffice() -> None:
+    compose = yaml.safe_load((ROOT / "compose.dev.yaml").read_text())
+    onlyoffice = compose["services"]["onlyoffice"]
+    makefile = (ROOT / "Makefile").read_text()
+    readme = (ROOT / "README.md").read_text()
+
+    assert onlyoffice["image"] == "onlyoffice/documentserver:9.4.0.1"
+    assert onlyoffice["ports"] == ["127.0.0.1:8080:80"]
+    assert onlyoffice["environment"]["JWT_ENABLED"] == "true"
+    assert onlyoffice["environment"]["JWT_SECRET"] == "${DEV_ONLYOFFICE_JWT_SECRET:?Set DEV_ONLYOFFICE_JWT_SECRET}"
+    assert onlyoffice["environment"]["ALLOW_PRIVATE_IP_ADDRESS"] == "true"
+    assert "host.docker.internal:host-gateway" in onlyoffice["extra_hosts"]
+    assert onlyoffice["healthcheck"]
+
+    assert "dev: onlyoffice-dev" in makefile
+    assert "backend-dev:" in makefile
+    assert "ONLYOFFICE_ENABLED=true" in makefile
+    assert "ONLYOFFICE_PUBLIC_URL=http://localhost:8080" in makefile
+    assert "ONLYOFFICE_INTERNAL_URL=http://localhost:8080" in makefile
+    assert "ONLYOFFICE_API_URL=http://host.docker.internal:8000" in makefile
+    assert "onlyoffice-dev-down:" in makefile
+    assert "make onlyoffice-dev-down" in readme

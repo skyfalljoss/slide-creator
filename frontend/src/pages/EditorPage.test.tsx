@@ -10,6 +10,7 @@ import {
   listDeckVersions,
   renameDeck,
   restoreDeckVersion,
+  saveDeckChanges,
 } from '@/lib/api'
 import { loadOnlyOfficeApi } from '@/lib/onlyoffice'
 import type { OnlyOfficeDocsApi } from '@/lib/onlyoffice'
@@ -23,6 +24,7 @@ vi.mock('@/lib/api', () => ({
   listDeckVersions: vi.fn(),
   renameDeck: vi.fn(),
   restoreDeckVersion: vi.fn(),
+  saveDeckChanges: vi.fn(),
 }))
 
 vi.mock('@/lib/onlyoffice', () => ({ loadOnlyOfficeApi: vi.fn() }))
@@ -93,6 +95,7 @@ describe('EditorPage', () => {
     vi.mocked(listDeckVersions).mockReset().mockResolvedValue({ versions: [] })
     vi.mocked(renameDeck).mockReset().mockResolvedValue({ ...deck, name: 'Renamed deck' })
     vi.mocked(restoreDeckVersion).mockReset()
+    vi.mocked(saveDeckChanges).mockReset().mockResolvedValue({ accepted: true })
     vi.mocked(loadOnlyOfficeApi).mockReset().mockResolvedValue({
       DocEditor: class {
         constructor(elementId: string, config: Record<string, unknown>) {
@@ -125,7 +128,7 @@ describe('EditorPage', () => {
     expect(destroyEditor).toHaveBeenCalledTimes(1)
   })
 
-  it('moves from unsaved to pending and confirms the next persisted version', async () => {
+  it('saves collected edits only after the app-header Save button is clicked', async () => {
     vi.mocked(getDeckStatus)
       .mockResolvedValueOnce(versionOne)
       .mockResolvedValueOnce(versionOne)
@@ -136,14 +139,23 @@ describe('EditorPage', () => {
       })
     renderEditor()
     await waitFor(() => expect(editorConfigs).toHaveLength(1))
+    const saveButton = screen.getByRole('button', { name: 'Save' })
+    expect(saveButton).toBeDisabled()
 
     act(() => documentStateHandler().onDocumentStateChange({ data: true }))
     expect(screen.getByText('Unsaved')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled()
+    expect(saveButton).toBeDisabled()
 
     act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    expect(screen.getByText('Unsaved')).toBeInTheDocument()
+    expect(saveButton).toBeEnabled()
+    expect(saveDeckChanges).not.toHaveBeenCalled()
+
+    fireEvent.click(saveButton)
     expect(screen.getByText('Saving…')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled()
+    await waitFor(() => expect(saveDeckChanges).toHaveBeenCalledWith('deck-1', 'deck-1-version-1'))
 
     await waitFor(() => expect(screen.getByText('Saved as version 2')).toBeInTheDocument(), {
       timeout: 4_000,
@@ -176,6 +188,7 @@ describe('EditorPage', () => {
     const pendingEvent = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(pendingEvent)
     expect(pendingEvent.defaultPrevented).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await screen.findByText('Saved as version 2', {}, { timeout: 3_000 })
     const savedEvent = new Event('beforeunload', { cancelable: true })
@@ -190,6 +203,7 @@ describe('EditorPage', () => {
     vi.useFakeTimers()
     act(() => documentStateHandler().onDocumentStateChange({ data: true }))
     act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000)
@@ -217,6 +231,7 @@ describe('EditorPage', () => {
     vi.useFakeTimers()
     act(() => documentStateHandler().onDocumentStateChange({ data: true }))
     act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000)
@@ -230,7 +245,14 @@ describe('EditorPage', () => {
     expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeInTheDocument()
   })
 
-  it('captures the dirty baseline before status advances and confirms immediately on clean', async () => {
+  it('captures the dirty baseline before status advances and confirms after manual save', async () => {
+    vi.mocked(getDeckStatus)
+      .mockResolvedValueOnce(versionOne)
+      .mockResolvedValue({
+        current_version_id: 'version-2',
+        current_version_number: 2,
+        updated_at: '2026-06-26T00:01:00Z',
+      })
     const { queryClient } = renderEditor()
     await waitFor(() => expect(editorConfigs).toHaveLength(1))
 
@@ -243,9 +265,10 @@ describe('EditorPage', () => {
       })
     })
     act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    expect(screen.getByText('Saved as version 2')).toBeInTheDocument()
-    expect(getDeckStatus).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('Saved as version 2', {}, { timeout: 2_000 })).toBeInTheDocument()
+    expect(getDeckStatus).toHaveBeenCalledTimes(2)
   })
 
   it('tracks repeated dirty and clean save cycles', async () => {
@@ -258,10 +281,14 @@ describe('EditorPage', () => {
 
     act(() => documentStateHandler().onDocumentStateChange({ data: true }))
     act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    const saveButton = screen.getByRole('button', { name: 'Save' })
+    fireEvent.click(saveButton)
     expect(await screen.findByText('Saved as version 2', {}, { timeout: 2_000 })).toBeInTheDocument()
 
     act(() => documentStateHandler().onDocumentStateChange({ data: true }))
     act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    await waitFor(() => expect(saveButton).toBeEnabled())
+    fireEvent.click(saveButton)
     expect(await screen.findByText('Saved as version 3', {}, { timeout: 2_000 })).toBeInTheDocument()
   })
 
@@ -276,8 +303,15 @@ describe('EditorPage', () => {
 
     act(() => documentStateHandler().onDocumentStateChange({ data: true }))
     act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    const saveButton = screen.getByRole('button', { name: 'Save' })
+    fireEvent.click(saveButton)
+    await act(async () => {
+      await Promise.resolve()
+    })
     act(() => documentStateHandler().onDocumentStateChange({ data: true }))
     act(() => documentStateHandler().onDocumentStateChange({ data: false }))
+    expect(saveButton).toBeEnabled()
+    fireEvent.click(saveButton)
 
     await act(async () => vi.advanceTimersByTimeAsync(1_000))
     expect(screen.getByText('Saving…')).toBeInTheDocument()

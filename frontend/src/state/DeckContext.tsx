@@ -7,10 +7,15 @@ export function DeckProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<DeckState>(loadInitialState)
 
   useEffect(() => {
-    if (state.sessionId) {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-    } else {
-      sessionStorage.removeItem(STORAGE_KEY)
+    try {
+      if (state.sessionId) {
+        const serialized = JSON.stringify(state, (key, value) => (key === 'image_b64' ? undefined : value))
+        sessionStorage.setItem(STORAGE_KEY, serialized)
+      } else {
+        sessionStorage.removeItem(STORAGE_KEY)
+      }
+    } catch {
+      // The in-memory deck remains usable when browser storage is unavailable or full.
     }
   }, [state])
 

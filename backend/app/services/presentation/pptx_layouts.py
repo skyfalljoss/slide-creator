@@ -140,17 +140,26 @@ class PptxLayoutMixin:
             label_from_first_bullet = bool(not data.subtitle and data.bullets)
 
         kicker = getattr(data, "kicker", None) or "KEY FIGURE"
-        self._add_eyebrow(slide, LAYOUT.left_margin, 0.82, kicker)
+        has_chapter = bool(getattr(data, "chapter_number", None) is not None and clean_inline_text(getattr(data, "chapter_title", "")))
+        if has_chapter:
+            pill_width = min(max(1.45, len(kicker.upper()) * 0.105 + 0.55), 3.4)
+            self._add_eyebrow(slide, 15.8 - pill_width, 0.23, kicker, width=3.4)
+            title_top = 0.92
+            rule_top = 1.75
+        else:
+            self._add_eyebrow(slide, LAYOUT.left_margin, 0.62, kicker)
+            title_top = 1.02
+            rule_top = 1.78
         if data.title and clean_inline_text(data.title) != clean_inline_text(value):
-            self._add_text(slide, LAYOUT.left_margin, 1.22, LAYOUT.header_title_width, 0.7, data.title, 28, self.theme.text, bold=True)
-            self._add_accent_bar(slide, LAYOUT.left_margin, 2.0, LAYOUT.accent_rule_width, height=LAYOUT.accent_rule_height)
+            self._add_text(slide, LAYOUT.left_margin, title_top, LAYOUT.header_title_width, 0.7, data.title, 28, self.theme.text, bold=True)
+            self._add_accent_bar(slide, LAYOUT.left_margin, rule_top, LAYOUT.accent_rule_width, height=LAYOUT.accent_rule_height)
 
-        self._add_text(slide, LAYOUT.left_margin, 2.45, LAYOUT.content_width, 1.55, value, 108, self.theme.accent, bold=True, align=PP_ALIGN.CENTER)
+        self._add_text(slide, LAYOUT.left_margin, 2.2, LAYOUT.content_width, 1.55, value, 108, self.theme.accent, bold=True, align=PP_ALIGN.CENTER)
         if label:
-            self._add_text(slide, 2.4, 4.08, self._LOGICAL_WIDTH - 4.8, 0.65, label, 26, self.theme.text, bold=True, align=PP_ALIGN.CENTER)
+            self._add_text(slide, 2.4, 3.83, self._LOGICAL_WIDTH - 4.8, 0.65, label, 26, self.theme.text, bold=True, align=PP_ALIGN.CENTER)
         remaining = data.bullets[1:] if label_from_first_bullet else data.bullets
         if remaining:
-            self._add_big_stat_supporting_cards(slide, remaining, 5.25)
+            self._add_big_stat_supporting_cards(slide, remaining, 5.05)
 
     @register_variant("before_after")
     def _apply_before_after(self, slide: Slide, data: SlideData) -> None:
@@ -207,10 +216,10 @@ class PptxLayoutMixin:
         )
 
     def _apply_agenda_overview(self, slide: Slide, data: SlideData) -> None:
-        self._add_text(slide, LAYOUT.left_margin, 0.55, 12.0, 1.0, "Presentation Agenda", 54, self.theme.text, bold=True)
+        self._add_text(slide, LAYOUT.left_margin, 0.25, 12.0, 0.75, "Presentation Agenda", 44, self.theme.text, bold=True)
         steps = self._agenda_items(data)
         left = LAYOUT.left_margin
-        top = 2.15
+        top = 1.55
         gap_x = 0.55
         gap_y = 0.45
         cw = (LAYOUT.content_width - gap_x) / 2
@@ -514,16 +523,17 @@ class PptxLayoutMixin:
             and clean_inline_text(getattr(data, "chapter_title", ""))
         )
         if kicker and has_chapter:
-            self._add_eyebrow(slide, LAYOUT.left_margin, 0.78, kicker)
-            self._add_text(slide, LAYOUT.left_margin, 1.18, LAYOUT.header_title_width, 0.9, title, 30, self.theme.text, bold=True)
-            rule_top = 1.96
+            # Chapter marker owns the top band; kicker + title sit clearly below it.
+            self._add_eyebrow(slide, LAYOUT.left_margin, 1.34, kicker)
+            self._add_text(slide, LAYOUT.left_margin, 1.9, LAYOUT.header_title_width, 0.9, title, 30, self.theme.text, bold=True)
+            rule_top = 2.66
         elif kicker:
             self._add_eyebrow(slide, LAYOUT.left_margin, 0.62, kicker)
             self._add_text(slide, LAYOUT.left_margin, 1.02, LAYOUT.header_title_width, 0.9, title, 30, self.theme.text, bold=True)
             rule_top = 1.78
         elif has_chapter:
-            self._add_text(slide, LAYOUT.left_margin, 0.86, LAYOUT.header_title_width, 0.9, title, 30, self.theme.text, bold=True)
-            rule_top = 1.78
+            self._add_text(slide, LAYOUT.left_margin, 1.34, LAYOUT.header_title_width, 0.9, title, 30, self.theme.text, bold=True)
+            rule_top = 2.18
         else:
             self._add_text(slide, LAYOUT.left_margin, 0.66, LAYOUT.header_title_width, 0.9, title, 30, self.theme.text, bold=True)
             rule_top = 1.6
@@ -589,16 +599,16 @@ class PptxLayoutMixin:
         label_color = THEMES["dark"].text if dark_backed else self._active_theme().text
         label = self._add_text(
             slide,
-            left + badge_width + 0.18,
-            top + 0.06,
-            8.4,
-            0.34,
+            left + badge_width + 0.2,
+            top,
+            9.5,
+            badge_height,
             chapter_title.upper(),
-            13,
+            16,
             label_color,
             bold=True,
         )
-        label.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        label.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
 
     def _add_card_grid(self, slide: Slide, items: list[str], top: float) -> None:
         """Lay bullets out as a responsive grid of icon-chip surface cards."""

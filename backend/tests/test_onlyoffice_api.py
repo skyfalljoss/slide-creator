@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import jwt
@@ -141,6 +142,40 @@ async def test_owner_receives_editor_config_and_private_pptx(onlyoffice_client):
     assert storage.requested_chunk_sizes == [256 * 1024]
     assert storage.closed is True
     assert storage.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_owner_can_request_manual_save_for_active_editor_key(onlyoffice_client):
+    client, service, _storage = onlyoffice_client
+    service.force_save = AsyncMock()
+
+    response = await client.post(
+        "/api/v1/decks/deck-1/save",
+        json={"document_key": "deck-1-version-1"},
+        headers={"x-user-id": "alice"},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"accepted": True}
+    service.force_save.assert_awaited_once()
+    call = service.force_save.await_args.kwargs
+    assert call["document_key"] == "deck-1-version-1"
+    assert isinstance(call["userdata"], str) and call["userdata"]
+
+
+@pytest.mark.asyncio
+async def test_manual_save_rejects_key_from_another_deck(onlyoffice_client):
+    client, service, _storage = onlyoffice_client
+    service.force_save = AsyncMock()
+
+    response = await client.post(
+        "/api/v1/decks/deck-1/save",
+        json={"document_key": "other-deck-version-1"},
+        headers={"x-user-id": "alice"},
+    )
+
+    assert response.status_code == 400
+    service.force_save.assert_not_awaited()
 
 
 @pytest.mark.asyncio

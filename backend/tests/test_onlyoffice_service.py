@@ -1,6 +1,8 @@
+import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import jwt
 import pytest
 
@@ -71,7 +73,7 @@ def test_editor_config_is_signed_for_current_version(service: OnlyOfficeService)
     }
     assert result.config["editorConfig"]["customization"] == {
         "autosave": True,
-        "forcesave": True,
+        "forcesave": False,
     }
     signed_config = jwt.decode(
         result.config["token"], SECRET, algorithms=["HS256"]
@@ -83,6 +85,50 @@ def test_editor_config_is_signed_for_current_version(service: OnlyOfficeService)
     assert signed_config["editorConfig"]["callbackUrl"].startswith(
         "http://api:8000/api/v1/decks/deck-1/callback?token="
     )
+
+
+@pytest.mark.asyncio
+async def test_force_save_sends_signed_command_for_active_editor_key():
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"error": 0, "key": "deck-1-version-1"},
+            request=request,
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    service = OnlyOfficeService(
+        public_url="http://localhost:8080",
+        api_base_url="http://api:8000",
+        internal_url="http://onlyoffice:80",
+        jwt_secret=SECRET,
+        file_token_ttl_seconds=300,
+        download_client=client,
+        now=lambda: NOW,
+    )
+
+    await service.force_save(
+        document_key="deck-1-version-1",
+        userdata="save-request-1",
+    )
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.url.path == "/command"
+    assert request.url.params["shardkey"] == "deck-1-version-1"
+    command = json.loads(request.content)
+    assert command["c"] == "forcesave"
+    assert command["key"] == "deck-1-version-1"
+    assert command["userdata"] == "save-request-1"
+    assert jwt.decode(command["token"], SECRET, algorithms=["HS256"]) == {
+        "c": "forcesave",
+        "key": "deck-1-version-1",
+        "userdata": "save-request-1",
+    }
+    await client.aclose()
 
 
 def test_editor_config_uses_separate_content_and_callback_lifetimes():

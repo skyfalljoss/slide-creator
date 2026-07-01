@@ -95,6 +95,41 @@ describe('OnlyOfficeEditor', () => {
     expect(destroyers[1]).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps React DOM ownership stable when ONLYOFFICE replaces its placeholder', async () => {
+    vi.mocked(loadOnlyOfficeApi).mockResolvedValue({
+      DocEditor: class {
+        private frame: HTMLIFrameElement
+
+        constructor(id: string) {
+          const placeholder = document.getElementById(id)
+          if (!placeholder?.parentNode) throw new Error('Editor placeholder is missing')
+          this.frame = document.createElement('iframe')
+          this.frame.dataset.onlyofficeFrame = id
+          placeholder.parentNode.replaceChild(this.frame, placeholder)
+        }
+
+        destroyEditor = () => {
+          this.frame.remove()
+        }
+      },
+    } as unknown as OnlyOfficeDocsApi)
+    const props = {
+      documentServerUrl: 'http://onlyoffice.test',
+      onDirtyChange: vi.fn(),
+      onError: vi.fn(),
+    }
+    const { rerender, unmount } = render(
+      <OnlyOfficeEditor key="version-1" {...props} config={{ version: 1 }} />,
+    )
+    await waitFor(() => expect(document.querySelector('[data-onlyoffice-frame]')).toBeInTheDocument())
+
+    expect(() => rerender(
+      <OnlyOfficeEditor key="version-2" {...props} config={{ version: 2 }} />,
+    )).not.toThrow()
+    await waitFor(() => expect(document.querySelector('[data-onlyoffice-frame]')).toBeInTheDocument())
+    expect(() => unmount()).not.toThrow()
+  })
+
   it('reports loader failures and never attempts destruction without an instance', async () => {
     const onError = vi.fn()
     vi.mocked(loadOnlyOfficeApi).mockRejectedValue(new Error('Docs API unavailable'))

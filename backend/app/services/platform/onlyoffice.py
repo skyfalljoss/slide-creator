@@ -33,6 +33,10 @@ class OnlyOfficeDownloadError(ValueError):
     """An ONLYOFFICE callback file could not be downloaded safely."""
 
 
+class OnlyOfficeCommandError(RuntimeError):
+    """An ONLYOFFICE document command was rejected or could not be sent."""
+
+
 class OnlyOfficeUnavailableError(RuntimeError):
     """ONLYOFFICE integration is disabled."""
 
@@ -128,6 +132,34 @@ class OnlyOfficeService:
     def ensure_enabled(self) -> None:
         if not self._enabled:
             raise OnlyOfficeUnavailableError("ONLYOFFICE integration is disabled")
+
+    async def force_save(self, *, document_key: str, userdata: str) -> None:
+        self.ensure_enabled()
+        if self._download_client is None:
+            raise OnlyOfficeCommandError("ONLYOFFICE command client is unavailable")
+        command = {
+            "c": "forcesave",
+            "key": document_key,
+            "userdata": userdata,
+        }
+        payload = {
+            **command,
+            "token": jwt.encode(command, self._jwt_secret, algorithm=_TOKEN_ALGORITHM),
+        }
+        url = (
+            f"{self._internal_url}/command?"
+            f"{urlencode({'shardkey': document_key})}"
+        )
+        try:
+            response = await self._download_client.post(url, json=payload)
+            response.raise_for_status()
+            result = response.json()
+        except asyncio.CancelledError:
+            raise
+        except (httpx.HTTPError, ValueError) as exc:
+            raise OnlyOfficeCommandError("ONLYOFFICE force-save request failed") from exc
+        if not isinstance(result, dict) or result.get("error") != 0:
+            raise OnlyOfficeCommandError("ONLYOFFICE rejected the force-save request")
 
     def validate_callback_authorization(
         self,
@@ -362,7 +394,7 @@ class OnlyOfficeService:
                 "mode": "edit",
                 "callbackUrl": callback_url,
                 "user": {"id": user_id, "name": user_name},
-                "customization": {"autosave": True, "forcesave": True},
+                "customization": {"autosave": True, "forcesave": False},
             },
         }
         config["token"] = jwt.encode(

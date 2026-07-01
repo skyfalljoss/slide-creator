@@ -265,6 +265,33 @@ def test_big_stat_supporting_cards_keep_body_text_right_of_icon_chip():
     assert body.left >= card.left + Inches(0.9)
 
 
+def test_big_stat_aligns_chapter_marker_and_kicker_on_one_header_row():
+    slides = [
+        SlideData(index=1, title="Title", bullets=[], notes="", layout="title"),
+        SlideData(
+            index=2,
+            title="Investment Delivers Rapid ROI and Significant Savings",
+            kicker="Quantifiable Impact",
+            bullets=["Reduce presentation creation time by 60%."],
+            notes="",
+            layout="content",
+            variant="big_stat",
+            chapter_number=2,
+            chapter_title="Solution & Impact",
+            blocks=[{"type": "stat", "value": "60%", "label": "Average reduction in presentation creation time"}],
+        ),
+    ]
+
+    prs = Presentation(BytesIO(PptxEngine().render(slides)))
+    shapes = prs.slides[1].shapes
+    chapter_number = next(shape for shape in shapes if shape.has_text_frame and shape.text == "02")
+    kicker = next(shape for shape in shapes if shape.has_text_frame and shape.text == "QUANTIFIABLE IMPACT")
+    title = next(shape for shape in shapes if shape.has_text_frame and shape.text == slides[1].title)
+
+    assert abs(kicker.top - chapter_number.top) <= Inches(0.15)
+    assert title.top >= chapter_number.top + chapter_number.height + Inches(0.2)
+
+
 def test_closing_layout_keeps_title_rule_and_bullets_tightly_grouped():
     slides = [
         SlideData(index=1, title="Title", bullets=[], notes="", layout="title"),
@@ -1262,8 +1289,21 @@ def test_presentation_agenda_renders_large_title_and_card_numbers():
     title = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text.strip() == "Presentation Agenda")
     numbers = [shape.text.strip() for shape in slide.shapes if shape.has_text_frame and shape.text.strip() in {"01", "02", "03", "04"}]
 
-    assert title.text_frame.paragraphs[0].font.size == Pt(54)
+    assert title.text_frame.paragraphs[0].font.size == Pt(44)
     assert numbers == ["01", "02", "03", "04"]
+
+
+def test_presentation_agenda_title_stays_inside_header_band():
+    prs = Presentation(BytesIO(PptxEngine().render(_presentation_agenda_slides())))
+    slide = prs.slides[1]
+    title = next(
+        shape
+        for shape in slide.shapes
+        if shape.has_text_frame and shape.text.strip() == "Presentation Agenda"
+    )
+
+    assert title.top + title.height <= Inches(1.1)
+    assert title.text_frame.paragraphs[0].font.size >= Pt(40)
 
 
 @pytest.mark.parametrize("aspect_ratio", ["16:9", "4:3"])
@@ -1537,6 +1577,19 @@ def _marker_shapes(slide):
     return number, label
 
 
+def test_kicker_clears_chapter_marker_band():
+    data = _chapter_slide(kicker="Time is Money")
+    slide = Presentation(BytesIO(PptxEngine().render([data]))).slides[0]
+    number, label = _marker_shapes(slide)
+    kicker = next(s for s in slide.shapes if s.has_text_frame and s.text.strip() == "TIME IS MONEY")
+    badge_bottom = number[0].top + number[0].height
+    # The kicker must sit below the chapter-marker row (no overlap) and below the band.
+    assert kicker.top >= badge_bottom
+    assert kicker.top >= Inches(1.1)
+    # The chapter title beside the number is rendered larger (was too small before).
+    assert label[0].text_frame.paragraphs[0].font.size == Pt(16)
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -1723,7 +1776,7 @@ def test_chapter_marker_is_bounded_fits_and_avoids_citi_logo(aspect_ratio):
     assert all(shape.left + shape.width <= prs.slide_width for shape in marker_shapes)
     assert all(shape.top + shape.height <= prs.slide_height for shape in marker_shapes)
     assert all(shape.left + shape.width <= logo.left for shape in marker_shapes)
-    assert label[0].text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    assert label[0].text_frame.paragraphs[0].font.size == Pt(16)
 
 
 @pytest.mark.parametrize("theme_name", ["minimalist", "bold", "dark"])
@@ -1807,7 +1860,7 @@ def test_chapter_marker_renders_after_full_bleed_body_and_before_logo(overrides)
 
 @pytest.mark.parametrize(
     ("kicker", "expected_title_top", "expected_rule_top"),
-    [("PLATFORM", 1.18, 1.96), (None, 0.86, 1.78)],
+    [("PLATFORM", 1.9, 2.66), (None, 1.34, 2.18)],
 )
 def test_content_header_moves_below_chapter_marker(kicker, expected_title_top, expected_rule_top):
     data = _chapter_slide(kicker=kicker)

@@ -1,0 +1,33 @@
+name: slideforge-dev
+
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver:9.4.0.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${DEV_ONLYOFFICE_JWT_SECRET:?Set DEV_ONLYOFFICE_JWT_SECRET}
+      JWT_HEADER: Authorization
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: 2gb
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost/healthcheck"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 90s
+    volumes:
+      - onlyoffice-dev-data:/var/www/onlyoffice/Data
+      - onlyoffice-dev-logs:/var/log/onlyoffice
+      - onlyoffice-dev-lib:/var/lib/onlyoffice
+      - onlyoffice-dev-db:/var/lib/postgresql
+
+volumes:
+  onlyoffice-dev-data:
+  onlyoffice-dev-logs:
+  onlyoffice-dev-lib:
+  onlyoffice-dev-db:

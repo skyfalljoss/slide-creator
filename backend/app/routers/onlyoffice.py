@@ -1,6 +1,7 @@
 import asyncio
 import re
 import unicodedata
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -18,6 +19,8 @@ from app.models.schemas import (
     ListDeckVersionsResponse,
     OnlyOfficeCallback,
     OnlyOfficeEditorConfig,
+    OnlyOfficeManualSaveRequest,
+    OnlyOfficeManualSaveResponse,
     RestoreVersionResponse,
 )
 from app.services.platform.auth import get_user_id
@@ -34,6 +37,7 @@ from app.services.platform.deck_versions import (
 )
 from app.services.platform.onlyoffice import (
     OnlyOfficeAuthorizationError,
+    OnlyOfficeCommandError,
     OnlyOfficeService,
     OnlyOfficeTokenError,
     OnlyOfficeUnavailableError,
@@ -211,6 +215,37 @@ async def get_editor_config(
     )
 
 
+@router.post(
+    "/decks/{deck_id}/save",
+    response_model=OnlyOfficeManualSaveResponse,
+    status_code=202,
+)
+async def save_deck_changes(
+    deck_id: str,
+    body: OnlyOfficeManualSaveRequest,
+    request: Request,
+    repository: DeckRepository = Depends(get_deck_repository),
+    onlyoffice: OnlyOfficeService = Depends(get_onlyoffice_service),
+) -> OnlyOfficeManualSaveResponse:
+    _require_onlyoffice(onlyoffice)
+    owner_id = get_user_id(request)
+    if await repository.get(deck_id, owner_id) is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    if not body.document_key.startswith(f"{deck_id}-"):
+        raise HTTPException(status_code=400, detail="Invalid editor document key")
+    try:
+        await onlyoffice.force_save(
+            document_key=body.document_key,
+            userdata=str(uuid4()),
+        )
+    except OnlyOfficeCommandError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="ONLYOFFICE could not save the deck",
+        ) from exc
+    return OnlyOfficeManualSaveResponse(accepted=True)
+
+
 @router.get("/decks/{deck_id}/content")
 async def get_deck_content(
     deck_id: str,
@@ -287,11 +322,13 @@ async def handle_onlyoffice_callback(
     if body.key != f"{deck_id}-{base_version_id}":
         return {"error": 1}
 
-    if body.status in {1, 4}:
+    if body.status in {1, 2, 4}:
         return {"error": 0}
     if body.status in {3, 7}:
         return {"error": 1}
-    if body.status not in {2, 6} or body.url is None:
+    if body.status == 6 and body.forcesavetype != 0:
+        return {"error": 0}
+    if body.status != 6 or body.url is None:
         return {"error": 1}
 
     owner_id = str(claims["sub"])

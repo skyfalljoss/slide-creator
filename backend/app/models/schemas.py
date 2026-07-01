@@ -170,9 +170,18 @@ class OnlyOfficeEditorConfig(BaseModel):
 class OnlyOfficeCallback(BaseModel):
     key: str
     status: int
+    forcesavetype: int | None = None
     url: str | None = None
     users: list[str] = Field(default_factory=list)
     userdata: str | None = None
+
+
+class OnlyOfficeManualSaveRequest(BaseModel):
+    document_key: str = Field(min_length=1, max_length=256)
+
+
+class OnlyOfficeManualSaveResponse(BaseModel):
+    accepted: bool
 
 
 class UploadResponse(BaseModel):

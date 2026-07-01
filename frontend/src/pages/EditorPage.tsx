@@ -12,6 +12,7 @@ import {
   getDeckStatus,
   getEditorConfig,
   renameDeck,
+  saveDeckChanges,
 } from '@/lib/api'
 import type { DeckStatus, OnlyOfficeEditorConfig } from '@/types'
 
@@ -20,12 +21,19 @@ type SaveState =
   | { kind: 'dirty'; baselineVersion: number }
   | { kind: 'pending'; baselineVersion: number }
   | { kind: 'confirmed'; version: number }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; baselineVersion: number }
 
 function queryErrorMessage(errors: unknown[]): string | null {
   const error = errors.find(Boolean)
   if (!error) return null
   return error instanceof Error ? error.message : 'Unable to open this deck'
+}
+
+function editorDocumentKey(config: Record<string, unknown> | undefined): string | null {
+  const document = config?.document
+  if (!document || typeof document !== 'object') return null
+  const key = (document as { key?: unknown }).key
+  return typeof key === 'string' && key.trim() ? key : null
 }
 
 export function EditorPage() {
@@ -35,6 +43,7 @@ export function EditorPage() {
   const [deckNameDraft, setDeckNameDraft] = useState<{ deckId: string; value: string } | null>(null)
   const [renameError, setRenameError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'clean' })
+  const [saveReady, setSaveReady] = useState(false)
   const [editorError, setEditorError] = useState<string | null>(null)
   const [editorAttempt, setEditorAttempt] = useState(0)
   const [versionsOpen, setVersionsOpen] = useState(false)
@@ -75,10 +84,13 @@ export function EditorPage() {
         setSaveState({
           kind: 'error',
           message: result.error instanceof Error ? result.error.message : 'Save confirmation failed',
+          baselineVersion: saveState.baselineVersion,
         })
+        setSaveReady(true)
         return
       }
       if (result.data && result.data.current_version_number > saveState.baselineVersion) {
+        setSaveReady(false)
         setSaveState({ kind: 'confirmed', version: result.data.current_version_number })
         return
       }
@@ -88,7 +100,12 @@ export function EditorPage() {
     const deadlineTimer = window.setTimeout(() => {
       cancelled = true
       if (pollTimer !== undefined) window.clearTimeout(pollTimer)
-      setSaveState({ kind: 'error', message: 'Save confirmation timed out' })
+      setSaveState({
+        kind: 'error',
+        message: 'Save confirmation timed out',
+        baselineVersion: saveState.baselineVersion,
+      })
+      setSaveReady(true)
     }, 30_000)
     return () => {
       cancelled = true
@@ -126,6 +143,20 @@ export function EditorPage() {
     },
   })
 
+  const manualSaveMutation = useMutation({
+    mutationFn: (documentKey: string) => saveDeckChanges(deckId!, documentKey),
+    onError: (error) => {
+      setSaveReady(true)
+      setSaveState((current) => ({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Failed to save deck',
+        baselineVersion: current.kind === 'pending' || current.kind === 'error'
+          ? current.baselineVersion
+          : 0,
+      }))
+    },
+  })
+
   const saveName = () => {
     if (cancelRenameRef.current) {
       cancelRenameRef.current = false
@@ -152,26 +183,43 @@ export function EditorPage() {
       ['deck-status', deckId],
     )?.current_version_number ?? 0
     if (dirty) {
+      setSaveReady(false)
       setSaveState((current) => {
         if (current.kind === 'dirty') return current
         if (current.kind === 'pending' && observedVersion <= current.baselineVersion) {
           return { kind: 'dirty', baselineVersion: current.baselineVersion + 1 }
         }
+        if (current.kind === 'error') {
+          return { kind: 'dirty', baselineVersion: current.baselineVersion }
+        }
         return { kind: 'dirty', baselineVersion: observedVersion }
       })
       return
     }
-    setSaveState((current) => {
-      if (current.kind !== 'dirty') return current
-      if (observedVersion > current.baselineVersion) {
-        return { kind: 'confirmed', version: observedVersion }
-      }
-      return {
-        kind: 'pending',
-        baselineVersion: current.baselineVersion,
-      }
-    })
+    setSaveReady(true)
   }, [deckId, queryClient])
+
+  const requestManualSave = () => {
+    if (
+      !saveReady
+      || manualSaveMutation.isPending
+      || (saveState.kind !== 'dirty' && saveState.kind !== 'error')
+    ) return
+    const documentKey = editorDocumentKey(configQuery.data?.config)
+    if (!documentKey) {
+      const baselineVersion = saveState.baselineVersion
+      setSaveState({
+        kind: 'error',
+        message: 'Editor document key is unavailable',
+        baselineVersion,
+      })
+      return
+    }
+    const baselineVersion = saveState.baselineVersion
+    setSaveReady(false)
+    setSaveState({ kind: 'pending', baselineVersion })
+    manualSaveMutation.mutate(documentKey)
+  }
 
   const handleEditorError = useCallback((message: string) => {
     setEditorError(message)
@@ -322,6 +370,17 @@ export function EditorPage() {
           {renameError && <span role="alert" className="truncate text-xs text-red-300">{renameError}</span>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            disabled={
+              !saveReady
+              || manualSaveMutation.isPending
+              || (saveState.kind !== 'dirty' && saveState.kind !== 'error')
+            }
+            onClick={requestManualSave}
+          >
+            Save
+          </Button>
           <Button size="sm" variant="outline" disabled={navigationBlocked} className="border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700" onClick={() => setVersionsOpen(true)}>Versions</Button>
           {navigationBlocked ? (
             <Button size="sm" disabled>Download</Button>

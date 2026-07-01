@@ -21,6 +21,7 @@ Install these before running the app:
 - Node.js 20+
 - `pnpm` 11+
 - `make` for the root convenience commands
+- Docker Engine with the Compose plugin for the local ONLYOFFICE editor
 
 ## First-Time Setup
 
@@ -50,6 +51,18 @@ This starts:
 
 - Backend API: `http://localhost:8000/api/v1`
 - Frontend app: `http://localhost:5173`
+- ONLYOFFICE Document Server: `http://localhost:8080`
+
+`make dev` starts the editor container first and configures the backend with the
+same development JWT secret. The first run downloads the pinned ONLYOFFICE
+image and can take several minutes. The editor is bound to loopback and is not
+exposed to other machines.
+
+When development is finished, stop the editor gracefully:
+
+```bash
+make onlyoffice-dev-down
+```
 
 You can also run each server separately:
 
@@ -132,9 +145,11 @@ Run these from the project root unless noted otherwise.
 
 | Command | Purpose |
 | --- | --- |
-| `make dev` | Start backend and frontend together |
+| `make dev` | Start local ONLYOFFICE, backend, and frontend together |
 | `make backend` | Start only the backend server |
 | `make frontend` | Start only the frontend server |
+| `make onlyoffice-dev` | Start the loopback-only local editor container |
+| `make onlyoffice-dev-down` | Gracefully stop the local editor container |
 | `make stack-up` | Build and start the internal Docker stack |
 | `make stack-down` | Stop the stack without deleting durable volumes |
 | `make stack-logs` | Follow application and editor logs |

@@ -127,12 +127,12 @@ async def test_error_status_returns_callback_error(callback_client, status):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", [2, 6])
-async def test_save_status_uses_only_trusted_token_identity(callback_client, status):
+async def test_manual_save_status_uses_only_trusted_token_identity(callback_client):
     client, service, versions, *_ = callback_client
     body = {
         "key": "deck-1-version-1",
-        "status": status,
+        "status": 6,
+        "forcesavetype": 0,
         "url": "http://onlyoffice/coauthoring/download/presentation.pptx",
         "users": ["mallory"],
         "userdata": "save-42",
@@ -148,10 +148,33 @@ async def test_save_status_uses_only_trusted_token_identity(callback_client, sta
             "owner_id": "alice",
             "content": callback_client[4],
             "base_version_id": "version-1",
-            "callback_key": f"deck-1-version-1:{status}:save-42",
+            "callback_key": "deck-1-version-1:6:save-42",
             "created_by": "alice",
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"key": "deck-1-version-1", "status": 2, "url": "http://onlyoffice/final.pptx"},
+        {
+            "key": "deck-1-version-1",
+            "status": 6,
+            "forcesavetype": 1,
+            "url": "http://onlyoffice/toolbar-save.pptx",
+        },
+    ],
+)
+async def test_non_app_save_callbacks_do_not_create_versions(callback_client, body):
+    client, service, versions, *_ = callback_client
+
+    response = await _post(client, service, body)
+
+    assert response.status_code == 200
+    assert response.json() == {"error": 0}
+    assert versions.calls == []
 
 
 @pytest.mark.asyncio
@@ -160,6 +183,7 @@ async def test_identical_callback_is_idempotent_at_version_service_boundary(call
     body = {
         "key": "deck-1-version-1",
         "status": 6,
+        "forcesavetype": 0,
         "url": "http://onlyoffice/download.pptx",
     }
 
@@ -209,7 +233,12 @@ async def test_authorization_jwt_must_match_callback_body(callback_client):
 )
 async def test_download_url_must_match_configured_origin(callback_client, url):
     client, service, versions, *_ = callback_client
-    body = {"key": "deck-1-version-1", "status": 6, "url": url}
+    body = {
+        "key": "deck-1-version-1",
+        "status": 6,
+        "forcesavetype": 0,
+        "url": url,
+    }
 
     response = await _post(client, service, body)
 
@@ -243,6 +272,7 @@ async def test_unsafe_or_invalid_download_is_not_persisted(callback_client, fail
     body = {
         "key": "deck-1-version-1",
         "status": 6,
+        "forcesavetype": 0,
         "url": "http://onlyoffice/file.pptx",
     }
 
@@ -259,6 +289,7 @@ async def test_persistence_failure_returns_error_and_logs_no_secrets(callback_cl
     body = {
         "key": "deck-1-version-1",
         "status": 6,
+        "forcesavetype": 0,
         "url": "http://onlyoffice/private?token=download-secret",
     }
     callback_token = service.create_scoped_token(
@@ -288,6 +319,7 @@ async def test_mismatched_document_key_is_rejected_before_download(callback_clie
     body = {
         "key": "deck-2-version-1",
         "status": 6,
+        "forcesavetype": 0,
         "url": "http://onlyoffice/private.pptx",
     }
 
@@ -348,6 +380,7 @@ async def test_drip_feed_download_hits_total_deadline(callback_client):
     body = {
         "key": "deck-1-version-1",
         "status": 6,
+        "forcesavetype": 0,
         "url": "http://onlyoffice/drip.pptx",
     }
 
@@ -444,6 +477,7 @@ async def test_concurrent_identical_callbacks_create_one_real_version(tmp_path):
     body = {
         "key": "deck-1-version-1",
         "status": 6,
+        "forcesavetype": 0,
         "url": "http://onlyoffice/file.pptx",
         "userdata": "concurrent-save",
     }

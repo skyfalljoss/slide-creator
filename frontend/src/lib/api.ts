@@ -126,6 +126,10 @@ export function getDeckStatus(deckId: string): Promise<DeckStatus> {
   return getRequest(`/decks/${encodeURIComponent(deckId)}/status`)
 }
 
+export function saveDeckChanges(deckId: string, documentKey: string): Promise<{ accepted: boolean }> {
+  return request(`/decks/${encodeURIComponent(deckId)}/save`, { document_key: documentKey })
+}
+
 export function listDeckVersions(deckId: string): Promise<{ versions: DeckVersion[] }> {
   return getRequest(`/decks/${encodeURIComponent(deckId)}/versions`)
 }

@@ -1,4 +1,4 @@
-import { useEffect, useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { loadOnlyOfficeApi } from '@/lib/onlyoffice'
 
 interface OnlyOfficeEditorProps {
@@ -32,8 +32,15 @@ export function OnlyOfficeEditor({
 }: OnlyOfficeEditorProps) {
   const reactId = useId()
   const containerId = `onlyoffice-editor-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const hostRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const placeholder = document.createElement('div')
+    placeholder.id = containerId
+    placeholder.className = 'h-full w-full'
+    host.replaceChildren(placeholder)
     let disposed = false
     let destroyed = false
     let editor: { destroyEditor(): void } | undefined
@@ -89,8 +96,9 @@ export function OnlyOfficeEditor({
     return () => {
       disposed = true
       destroy()
+      host.replaceChildren()
     }
   }, [config, containerId, documentServerUrl, onDirtyChange, onError])
 
-  return <div id={containerId} className="h-full w-full" data-testid="onlyoffice-editor" />
+  return <div ref={hostRef} className="h-full w-full" data-testid="onlyoffice-editor" />
 }

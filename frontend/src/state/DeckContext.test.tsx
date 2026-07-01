@@ -1,5 +1,5 @@
 import { act, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExportResponse, SlideData, UploadResponse } from '@/types'
 import { DeckProvider } from './DeckContext'
 import { useDeck } from './deck'
@@ -29,6 +29,12 @@ function Harness() {
       <div data-testid="slide-title">{deck.state.slides[0]?.title ?? 'none'}</div>
       <div data-testid="export">{deck.state.lastExport?.download_url ?? 'none'}</div>
       <button onClick={() => deck.setGeneratedDeck({ sessionId: 's1', deckType: 'sales_9', slides: [slide], uploadedFile: upload })}>set</button>
+      <button onClick={() => deck.setGeneratedDeck({
+        sessionId: 's-large',
+        deckType: 'sales_9',
+        slides: [{ ...slide, image_b64: 'A'.repeat(1024) } as SlideData],
+        uploadedFile: upload,
+      })}>set-large</button>
       <button onClick={() => deck.updateSlide({ ...slide, title: 'Updated' })}>update</button>
       <button onClick={() => deck.setExportResult({ download_url: '/download/s1.pptx', expires_at: '2026-06-17T12:00:00Z' })}>export</button>
       <button onClick={deck.clearDeck}>clear</button>
@@ -76,7 +82,7 @@ describe('DeckProvider', () => {
   })
 
   it('hydrates from sessionStorage', () => {
-  const stored = {
+    const stored = {
       sessionId: 'stored-session',
       savedDeckId: 'deck-1',
       deckType: 'internal_6',
@@ -90,5 +96,27 @@ describe('DeckProvider', () => {
 
     expect(screen.getByTestId('session')).toHaveTextContent('stored-session')
     expect(screen.getByTestId('slide-title')).toHaveTextContent('Stored Slide')
+  })
+
+  it('does not persist embedded slide images in sessionStorage', () => {
+    render(<DeckProvider><Harness /></DeckProvider>)
+
+    act(() => screen.getByText('set-large').click())
+
+    const stored = sessionStorage.getItem('slideforge.deck')
+    expect(stored).not.toContain('image_b64')
+    expect(screen.getByTestId('session')).toHaveTextContent('s-large')
+  })
+
+  it('keeps the deck usable when sessionStorage exceeds its quota', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage quota exceeded', 'QuotaExceededError')
+    })
+    render(<DeckProvider><Harness /></DeckProvider>)
+
+    expect(() => act(() => screen.getByText('set').click())).not.toThrow()
+    expect(screen.getByTestId('session')).toHaveTextContent('s1')
+
+    setItem.mockRestore()
   })
 })

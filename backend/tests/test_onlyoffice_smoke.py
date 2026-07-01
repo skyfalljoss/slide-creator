@@ -209,6 +209,7 @@ async def test_real_onlyoffice_docs_api_and_force_save_callback(tmp_path):
             body = {
                 "key": f"{deck_id}-{version_id}",
                 "status": 6,
+                "forcesavetype": 0,
                 "url": converted_url,
                 "userdata": "smoke-force-save",
             }
